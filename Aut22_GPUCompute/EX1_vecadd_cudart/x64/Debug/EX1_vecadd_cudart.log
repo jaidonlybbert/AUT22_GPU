@@ -1,0 +1,7 @@
+﻿  Compiling CUDA source file kernel.cu...
+  
+  C:\Users\jaido\source\AUT22_GPU\Aut22_GPUCompute\EX1_vecadd_cudart>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin\nvcc.exe" -gencode=arch=compute_52,code=\"sm_52,compute_52\" --use-local-env -ccbin "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.33.31629\bin\HostX64\x64" -x cu   -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include"  -G   --keep-dir x64\Debug  -maxrregcount=0  --machine 64 --compile -cudart static  -g  -DWIN32 -DWIN64 -D_DEBUG -D_CONSOLE -D_MBCS -Xcompiler "/EHsc /W3 /nologo /Od /Fdx64\Debug\vc143.pdb /FS /Zi /RTC1 /MDd " -o C:\Users\jaido\source\AUT22_GPU\Aut22_GPUCompute\EX1_vecadd_cudart\x64\Debug\kernel.cu.obj "C:\Users\jaido\source\AUT22_GPU\Aut22_GPUCompute\EX1_vecadd_cudart\kernel.cu" 
+  kernel.cu
+     Creating library C:\Users\jaido\source\AUT22_GPU\Aut22_GPUCompute\x64\Debug\EX1_vecadd_cudart.lib and object C:\Users\jaido\source\AUT22_GPU\Aut22_GPUCompute\x64\Debug\EX1_vecadd_cudart.exp
+LINK : warning LNK4098: defaultlib 'LIBCMT' conflicts with use of other libs; use /NODEFAULTLIB:library
+  EX1_vecadd_cudart.vcxproj -> C:\Users\jaido\source\AUT22_GPU\Aut22_GPUCompute\x64\Debug\EX1_vecadd_cudart.exe
