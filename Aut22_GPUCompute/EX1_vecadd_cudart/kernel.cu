@@ -3,6 +3,7 @@
 #include "device_launch_parameters.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size);
 
@@ -15,9 +16,17 @@ __global__ void addKernel(int *c, const int *a, const int *b)
 int main()
 {
     const int arraySize = 5;
-    const int a[arraySize] = { 1, 2, 3, 4, 5 };
-    const int b[arraySize] = { 10, 20, 30, 40, 50 };
-    int c[arraySize] = { 0 };
+    //const int a[arraySize] = { 1, 2, 3, 4, 5 };
+    //const int b[arraySize] = { 10, 20, 30, 40, 50 };
+    //int c[arraySize] = { 0 };
+    int* a = (int*)malloc(arraySize*sizeof(int));
+    int* b = (int*)malloc(arraySize*sizeof(int));
+    int* c = (int*)malloc(arraySize*sizeof(int));
+
+    for (int x = 0, int* pa = a, int* pb = b; x < arraySize; x++) {
+        *pa++ = x + 1;
+        *pb++ = 10 * (x + 1);
+    }
 
     // Add vectors in parallel.
     cudaError_t cudaStatus = addWithCuda(c, a, b, arraySize);
@@ -26,7 +35,9 @@ int main()
         return 1;
     }
 
-    printf("{1,2,3,4,5} + {10,20,30,40,50} = {%d,%d,%d,%d,%d}\n",
+    printf("{%d,%d,%d,%d,%d} + {%d,%d,%d,%d,%d} = {%d,%d,%d,%d,%d}\n",
+        a[0], a[1], a[2], a[3], a[4],
+        b[0], b[1], b[2], b[3], b[4],
         c[0], c[1], c[2], c[3], c[4]);
 
     // cudaDeviceReset must be called before exiting in order for profiling and
