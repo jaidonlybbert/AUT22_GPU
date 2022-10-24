@@ -1,0 +1,673 @@
+﻿  Compiling CUDA source file kernel.cu...
+  
+  C:\Users\jaido\source\AUT22_GPU\HW1\HW1>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin\nvcc.exe" -gencode=arch=compute_52,code=\"sm_52,compute_52\" --use-local-env -ccbin "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.33.31629\bin\HostX64\x64" -x cu   -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include"  -G   --keep-dir x64\Debug  -maxrregcount=0  --machine 64 --compile -cudart static  -g  -DWIN32 -DWIN64 -D_DEBUG -D_CONSOLE -D_MBCS -Xcompiler "/EHsc /W3 /nologo /Od /Fdx64\Debug\vc143.pdb /FS /Zi /RTC1 /MDd " -o C:\Users\jaido\source\AUT22_GPU\HW1\HW1\x64\Debug\kernel.cu.obj "C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu" 
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(141): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(148): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(154): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(160): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(167): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(173): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(183): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(191): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(198): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(266): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (302): here
+              variable "dimBlock"
+  (303): here
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(273): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (302): here
+              variable "dimBlock"
+  (303): here
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(279): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (302): here
+              variable "dimBlock"
+  (303): here
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(285): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (302): here
+              variable "dimBlock"
+  (303): here
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(292): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (302): here
+              variable "dimBlock"
+  (303): here
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(298): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (302): here
+              variable "dimBlock"
+  (303): here
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(311): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(319): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(326): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(399): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (435): here
+              variable "dimBlock"
+  (436): here
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(406): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (435): here
+              variable "dimBlock"
+  (436): here
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(412): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (435): here
+              variable "dimBlock"
+  (436): here
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(418): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (435): here
+              variable "dimBlock"
+  (436): here
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(425): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (435): here
+              variable "dimBlock"
+  (436): here
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(431): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (435): here
+              variable "dimBlock"
+  (436): here
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(444): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(452): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(459): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(141): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(148): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(154): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(160): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(167): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(173): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(183): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(191): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(198): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (201): here
+              variable "correct"
+  (203): here
+              variable "sum_of_squared_diff"
+  (204): here
+              variable "variance"
+  (219): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(266): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (302): here
+              variable "dimBlock"
+  (303): here
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(273): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (302): here
+              variable "dimBlock"
+  (303): here
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(279): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (302): here
+              variable "dimBlock"
+  (303): here
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(285): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (302): here
+              variable "dimBlock"
+  (303): here
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(292): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (302): here
+              variable "dimBlock"
+  (303): here
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(298): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (302): here
+              variable "dimBlock"
+  (303): here
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(311): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(319): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(326): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (329): here
+              variable "correct"
+  (331): here
+              variable "sum_of_squared_diff"
+  (332): here
+              variable "variance"
+  (343): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(399): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (435): here
+              variable "dimBlock"
+  (436): here
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(406): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (435): here
+              variable "dimBlock"
+  (436): here
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(412): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (435): here
+              variable "dimBlock"
+  (436): here
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(418): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (435): here
+              variable "dimBlock"
+  (436): here
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(425): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (435): here
+              variable "dimBlock"
+  (436): here
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(431): warning #546-D: transfer of control bypasses initialization of:
+              variable "dimGrid"
+  (435): here
+              variable "dimBlock"
+  (436): here
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(444): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(452): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(459): warning #546-D: transfer of control bypasses initialization of:
+              variable "tolerance"
+  (462): here
+              variable "correct"
+  (464): here
+              variable "sum_of_squared_diff"
+  (465): here
+              variable "variance"
+  (478): here
+  
+  kernel.cu
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(64): warning C4244: 'argument': conversion from 'double' to 'int', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(111): warning C4305: 'initializing': truncation from 'double' to 'float'
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(120): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(121): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(177): warning C4244: 'argument': conversion from 'double' to 'unsigned int', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(201): warning C4305: 'initializing': truncation from 'double' to 'float'
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(206): warning C4244: '+=': conversion from 'double' to 'float', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(242): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(243): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(302): warning C4244: 'argument': conversion from 'double' to 'unsigned int', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(302): warning C4244: 'argument': conversion from 'double' to 'unsigned int', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(329): warning C4305: 'initializing': truncation from 'double' to 'float'
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(335): warning C4244: '+=': conversion from 'double' to 'float', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(354): warning C4533: initialization of 'dimBlock' is skipped by 'goto Error'
+  C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(303): note: see declaration of 'dimBlock'
+  C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(354): note: see declaration of 'Error'
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(354): warning C4533: initialization of 'dimGrid' is skipped by 'goto Error'
+  C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(302): note: see declaration of 'dimGrid'
+  C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(354): note: see declaration of 'Error'
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(373): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(374): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(435): warning C4244: 'argument': conversion from 'double' to 'unsigned int', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(435): warning C4244: 'argument': conversion from 'double' to 'unsigned int', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(435): warning C4244: 'argument': conversion from 'double' to 'unsigned int', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(462): warning C4305: 'initializing': truncation from 'double' to 'float'
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(469): warning C4244: '+=': conversion from 'double' to 'float', possible loss of data
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(489): warning C4533: initialization of 'dimBlock' is skipped by 'goto Error'
+  C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(436): note: see declaration of 'dimBlock'
+  C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(489): note: see declaration of 'Error'
+C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(489): warning C4533: initialization of 'dimGrid' is skipped by 'goto Error'
+  C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(435): note: see declaration of 'dimGrid'
+  C:\Users\jaido\source\AUT22_GPU\HW1\HW1\kernel.cu(489): note: see declaration of 'Error'
+  HW1.vcxproj -> C:\Users\jaido\source\AUT22_GPU\HW1\x64\Debug\HW1.exe
