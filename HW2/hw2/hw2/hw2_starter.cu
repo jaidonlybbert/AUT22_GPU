@@ -18,6 +18,32 @@ const float BLUR_FILT[81] = { 0.1084,0.1762,0.2494,0.3071,0.3292,0.3071,0.2494,0
 
 // DEFINE your CUDA blur kernel function(s) here
 // blur kernel #1 - global memory only
+__global__ void blurKernelGlobalMemory(unsigned char* imgData, unsigned char* imgOut, float* blurFilt, int imgDim, int filtDim)
+{
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (col < imgDim && row < imgDim) {
+        int pixVal = 0;
+        int pixels = 0;
+
+        // Get the average of the surrounding 2xBLUR_SIZE x 2xBLUR_SIZE box
+        for (int blurRow = -filtDim; blurRow < filtDim + 1; ++blurRow) {
+            for (int blurCol = -filtDim; blurCol < filtDim + 1; ++blurCol) {
+                int curRow = row + blurRow;
+                int curCol = col + blurCol;
+                // Verify we have a valid image pixel
+                if (curRow > -1 && curRow < imgDim && curCol > -1 && curCol < imgDim) {
+                    pixVal += imgData[curRow * imgDim + curCol];
+                    pixels++; // Keep track of number of pixels in the accumulated total
+                }
+            }
+        }
+        // Write our new pixel value out
+        imgOut[row * imgDim + col] = (unsigned char)(pixVal / pixels);
+    }
+}
+
 // blur kernel #2 - device shared memory (static alloc)
 // blur kernel #2 - device shared memory (dynamic alloc)
 
@@ -35,6 +61,7 @@ int main()
     int n_pixdepth = 0;
     unsigned char* h_imgData = stbi_load(filename, &x_cols, &y_rows, &n_pixdepth, 1);
     int imgSize = x_cols * y_rows * (int)sizeof(unsigned char);
+    int imgDim = x_cols;
 
     // setup additional host variables, allocate host memory as needed
     cudaError_t cudaStatus;
@@ -44,17 +71,23 @@ int main()
 
     // allocate device memory
     unsigned char* dev_imageData = 0;
+    unsigned char* dev_imageOut = 0;
     float* dev_blurFilt = 0;
     
     cudaStatus = cudaMalloc((void**)&dev_imageData, imgSize);
+    cudaStatus = cudaMalloc((void**)&dev_imageOut, imgSize);
     cudaStatus = cudaMalloc((void**)&dev_blurFilt, 81 * sizeof(float));
 
     // copy host data to device
     cudaStatus = cudaMemcpy(dev_imageData, h_imgData, imgSize, cudaMemcpyHostToDevice);
+    cudaStatus = cudaMemcpy(dev_imageOut, h_imgOut, imgSize, cudaMemcpyHostToDevice);
     cudaStatus = cudaMemcpy(dev_blurFilt, &BLUR_FILT[0], 81 * sizeof(float), cudaMemcpyHostToDevice);
 
     // START timer #2
     // launch kernel --- use appropriate heuristics to determine #threads/block and #blocks/grid to ensure coverage of your 2D data range
+    dim3 DimGrid(imgDim / 16 + 1, imgDim / 16 + 1, 1);
+    dim3 DimBlock(16, 16, 1);
+    blurKernelGlobalMemory<<<DimGrid, DimBlock>>>(dev_imageData, dev_imageOut, dev_blurFilt, imgDim, BLUR_FILTER_WIDTH);
 
     // Check for any errors launching the kernel
     cudaStatus = checkCuda(cudaGetLastError());
@@ -65,10 +98,20 @@ int main()
 
     // call cudaDeviceSynchronize() to wait for the kernel to finish, and return
     // any errors encountered during the launch.
+    cudaStatus = cudaDeviceSynchronize();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+        goto Error;
+    }
     
     // STOP timer #2
     // 
     // retrieve result data from device back to host
+    cudaStatus = cudaMemcpy(h_imgOut, dev_imageOut, imgSize, cudaMemcpyDeviceToHost);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed!");
+        goto Error;
+    }
 
     // STOP timer #1
 
@@ -76,7 +119,8 @@ int main()
     // tracing tools such as Nsight and Visual Profiler to show complete traces.
 
     // save result output image data to file
-    const char imgFileOut[] = "c:/Temp/AUT22_GPUCompute/dat/hw2_outimage1.png";
+
+    const char imgFileOut[] = "../util/hw2_outimage1.png";
     stbi_write_png(imgFileOut, x_cols, y_rows, 1, h_imgOut, x_cols * n_pixdepth);
 
 
@@ -90,6 +134,9 @@ int main()
 Error:  // assumes error macro has a goto Error statement
 
     // free host and device memory
+    cudaFree(dev_blurFilt);
+    cudaFree(dev_imageData);
+    cudaFree(dev_imageOut);
 
     return 0;
 }
