@@ -3,6 +3,7 @@
 #include "device_launch_parameters.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <profileapi.h>
 
 #define STB_IMAGE_IMPLEMENTATION // this is needed
 #include "../util/stb_image.h"  // download from class website files
@@ -12,18 +13,23 @@
 // #include your error-check macro header file here
 #include "../util/cuda_helpers.h"
 
+#ifndef __CUDACC__  
+#define __CUDACC__
+#endif
+#include <device_functions.h>
+
 // global gaussian blur filter coefficients array here
 #define BLUR_FILTER_WIDTH 9  // 9x9 (square) Gaussian blur filter
 const float BLUR_FILT[81] = { 0.1084,0.1762,0.2494,0.3071,0.3292,0.3071,0.2494,0.1762,0.1084,0.1762,0.2865,0.4054,0.4994,0.5353,0.4994,0.4054,0.2865,0.1762,0.2494,0.4054,0.5738,0.7066,0.7575,0.7066,0.5738,0.4054,0.2494,0.3071,0.4994,0.7066,0.8703,0.9329,0.8703,0.7066,0.4994,0.3071,0.3292,0.5353,0.7575,0.9329,1.0000,0.9329,0.7575,0.5353,0.3292,0.3071,0.4994,0.7066,0.8703,0.9329,0.8703,0.7066,0.4994,0.3071,0.2494,0.4054,0.5738,0.7066,0.7575,0.7066,0.5738,0.4054,0.2494,0.1762,0.2865,0.4054,0.4994,0.5353,0.4994,0.4054,0.2865,0.1762,0.1084,0.1762,0.2494,0.3071,0.3292,0.3071,0.2494,0.1762,0.1084};
 
 // DEFINE your CUDA blur kernel function(s) here
 // blur kernel #1 - global memory only
-__global__ void blurKernelGlobalMemory(unsigned char* imgData, unsigned char* imgOut, float* blurFilt, int imgDim, int filtDim)
+__global__ void blurKernelGlobalMemory(unsigned char* imgData, unsigned char* imgOut, float* blurFilt, int imgDim)
 {
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
 
-    int filtPadding = (filtDim - 1) / 2;
+    int filtPadding = (BLUR_FILTER_WIDTH - 1) / 2;
 
     if (col < imgDim && row < imgDim) {
         float pixFloatVal = 0.0;
@@ -38,8 +44,8 @@ __global__ void blurKernelGlobalMemory(unsigned char* imgData, unsigned char* im
                 int curCol = col + blurCol;
                 // Verify we have a valid image pixel
                 if (curRow > -1 && curRow < imgDim && curCol > -1 && curCol < imgDim) {
-                    pixFloatVal += (float)(imgData[curRow * imgDim + curCol] * blurFilt[blurRow * filtDim + blurCol]);
-                    pixNormalizeFactor += blurFilt[blurRow * filtDim + blurCol]; // Accumulate a factor to normalize by
+                    pixFloatVal += (float)(imgData[curRow * imgDim + curCol] * blurFilt[blurRow * BLUR_FILTER_WIDTH + blurCol]);
+                    pixNormalizeFactor += blurFilt[blurRow * BLUR_FILTER_WIDTH + blurCol]; // Accumulate a factor to normalize by
                 }
             }
         }
@@ -49,7 +55,82 @@ __global__ void blurKernelGlobalMemory(unsigned char* imgData, unsigned char* im
 }
 
 // blur kernel #2 - device shared memory (static alloc)
+__global__ void blurKernelStaticMemory(unsigned char* imgData, unsigned char* imgOut, float* blurFilt, int imgDim)
+{
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int filtPadding = (BLUR_FILTER_WIDTH - 1) / 2;
+
+    // Copy filter coefficients from global -> shared memory using first 81 threads of the block
+    __shared__ float ds_blurFilt[BLUR_FILTER_WIDTH][BLUR_FILTER_WIDTH];
+    if (threadIdx.x < 9 && threadIdx.y < 9) {
+        ds_blurFilt[threadIdx.y][threadIdx.x] = blurFilt[threadIdx.y * BLUR_FILTER_WIDTH + threadIdx.x];
+    }
+    __syncthreads();
+
+    // Apply the filter to the image
+    if (col < imgDim && row < imgDim) {
+        float pixFloatVal = 0.0;
+        float pixNormalizeFactor = 0.0;
+        int pixVal = 0;
+        int pixels = 0;
+
+        // Get the weighted average of the surrounding pixels using the gaussian blur filter
+        for (int blurRow = -filtPadding; blurRow < filtPadding + 1; ++blurRow) {
+            for (int blurCol = -filtPadding; blurCol < filtPadding + 1; ++blurCol) {
+                int curRow = row + blurRow;
+                int curCol = col + blurCol;
+                // Verify we have a valid image pixel
+                if (curRow > -1 && curRow < imgDim && curCol > -1 && curCol < imgDim) {
+                    pixFloatVal += (float)(imgData[curRow * imgDim + curCol] * ds_blurFilt[blurRow][blurCol]);
+                    pixNormalizeFactor += ds_blurFilt[blurRow][blurCol]; // Accumulate a factor to normalize by
+                }
+            }
+        }
+        // Write our new pixel value out
+        imgOut[row * imgDim + col] = (unsigned char)(int)(pixFloatVal / pixNormalizeFactor);
+    }
+}
+
+
 // blur kernel #2 - device shared memory (dynamic alloc)
+extern __shared__ float s_blurFilt[];
+
+__global__ void blurKernelDynamicMemory(unsigned char* imgData, unsigned char* imgOut, float* blurFilt, int imgDim)
+{
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int filtPadding = (BLUR_FILTER_WIDTH - 1) / 2;
+
+    // Copy filter coefficients from global -> shared memory using first 81 threads of the block
+    if (threadIdx.x < 9 && threadIdx.y < 9) {
+        s_blurFilt[threadIdx.y * BLUR_FILTER_WIDTH + threadIdx.x] = blurFilt[threadIdx.y * BLUR_FILTER_WIDTH + threadIdx.x];
+    }
+    __syncthreads();
+
+    // Apply the filter to the image
+    if (col < imgDim && row < imgDim) {
+        float pixFloatVal = 0.0;
+        float pixNormalizeFactor = 0.0;
+        int pixVal = 0;
+        int pixels = 0;
+
+        // Get the weighted average of the surrounding pixels using the gaussian blur filter
+        for (int blurRow = -filtPadding; blurRow < filtPadding + 1; ++blurRow) {
+            for (int blurCol = -filtPadding; blurCol < filtPadding + 1; ++blurCol) {
+                int curRow = row + blurRow;
+                int curCol = col + blurCol;
+                // Verify we have a valid image pixel
+                if (curRow > -1 && curRow < imgDim && curCol > -1 && curCol < imgDim) {
+                    pixFloatVal += (float)(imgData[curRow * imgDim + curCol] * s_blurFilt[blurRow * BLUR_FILTER_WIDTH + blurCol]);
+                    pixNormalizeFactor += s_blurFilt[blurRow * BLUR_FILTER_WIDTH + blurCol]; // Accumulate a factor to normalize by
+                }
+            }
+        }
+        // Write our new pixel value out
+        imgOut[row * imgDim + col] = (unsigned char)(int)(pixFloatVal / pixNormalizeFactor);
+    }
+}
 
 
 // EXTRA CREDIT
@@ -91,7 +172,8 @@ int main()
     // launch kernel --- use appropriate heuristics to determine #threads/block and #blocks/grid to ensure coverage of your 2D data range
     dim3 DimGrid(imgDim / 16 + 1, imgDim / 16 + 1, 1);
     dim3 DimBlock(16, 16, 1);
-    blurKernelGlobalMemory<<<DimGrid, DimBlock>>>(dev_imageData, dev_imageOut, dev_blurFilt, imgDim, BLUR_FILTER_WIDTH);
+    
+    blurKernelDynamicMemory<<<DimGrid, DimBlock>>>(dev_imageData, dev_imageOut, dev_blurFilt, imgDim);
 
     // Check for any errors launching the kernel
     cudaStatus = checkCuda(cudaGetLastError());
