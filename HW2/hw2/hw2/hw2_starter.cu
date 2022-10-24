@@ -23,24 +23,28 @@ __global__ void blurKernelGlobalMemory(unsigned char* imgData, unsigned char* im
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
 
+    int filtPadding = (filtDim - 1) / 2;
+
     if (col < imgDim && row < imgDim) {
+        float pixFloatVal = 0.0;
+        float pixNormalizeFactor = 0.0;
         int pixVal = 0;
         int pixels = 0;
 
-        // Get the average of the surrounding 2xBLUR_SIZE x 2xBLUR_SIZE box
-        for (int blurRow = -filtDim; blurRow < filtDim + 1; ++blurRow) {
-            for (int blurCol = -filtDim; blurCol < filtDim + 1; ++blurCol) {
+        // Get the weighted average of the surrounding pixels using the gaussian blur filter
+        for (int blurRow = -filtPadding; blurRow < filtPadding + 1; ++blurRow) {
+            for (int blurCol = -filtPadding; blurCol < filtPadding + 1; ++blurCol) {
                 int curRow = row + blurRow;
                 int curCol = col + blurCol;
                 // Verify we have a valid image pixel
                 if (curRow > -1 && curRow < imgDim && curCol > -1 && curCol < imgDim) {
-                    pixVal += imgData[curRow * imgDim + curCol];
-                    pixels++; // Keep track of number of pixels in the accumulated total
+                    pixFloatVal += (float)(imgData[curRow * imgDim + curCol] * blurFilt[blurRow * filtDim + blurCol]);
+                    pixNormalizeFactor += blurFilt[blurRow * filtDim + blurCol]; // Accumulate a factor to normalize by
                 }
             }
         }
         // Write our new pixel value out
-        imgOut[row * imgDim + col] = (unsigned char)(pixVal / pixels);
+        imgOut[row * imgDim + col] = (unsigned char)(int)(pixFloatVal / pixNormalizeFactor);
     }
 }
 
@@ -61,7 +65,7 @@ int main()
     int n_pixdepth = 0;
     unsigned char* h_imgData = stbi_load(filename, &x_cols, &y_rows, &n_pixdepth, 1);
     int imgSize = x_cols * y_rows * (int)sizeof(unsigned char);
-    int imgDim = x_cols;
+    int imgDim = 240;
 
     // setup additional host variables, allocate host memory as needed
     cudaError_t cudaStatus;
