@@ -11,8 +11,8 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{925C26EB-3FA7-49D5-9CBF-6500082871C8}</ProjectGuid>
-    <RootNamespace>HW3</RootNamespace>
+    <ProjectGuid>{3FB2412E-6196-4F97-B716-F97CC84275D2}</ProjectGuid>
+    <RootNamespace>HW4</RootNamespace>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
@@ -74,13 +74,10 @@
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
-      <CodeGeneration>compute_86,sm_86</CodeGeneration>
-      <PtxAsOptionV>true</PtxAsOptionV>
-      <AdditionalOptions>--fmad=false %(AdditionalOptions)</AdditionalOptions>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CudaCompile Include="hw3_mmult.cu" />
+    <CudaCompile Include="hw4.cu" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
