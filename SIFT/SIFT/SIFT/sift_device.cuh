@@ -3,6 +3,7 @@
 void dev_bilinear_interpolate(unsigned char* inputArray, unsigned char** inputArrayExpanded, int inputWidth, int inputHeight,
     float spacing, int* resultWidth, int* resultHeight);
 void dev_gaussian_blur(unsigned char* img, unsigned char* outputArray, int inputWidth, int inputHeight, float sigma, int kernelWidth);
+void dev_matrix_subtract(unsigned char* dev_imgA, unsigned char* dev_imgB, unsigned char* dev_imgC, int width, int height);
 __global__ void bilinear_interpolate_kernel(unsigned char* input, unsigned char* output, float spacing, int inputWidth, int inputHeight, int resultWidth, int resultHeight, int inputTileWidth);
 __global__ void gaussian_blur_kernel(unsigned char* input, unsigned char* output, float* gaussianKernel, int height, int width, int kernelDim);
 __global__ void matrix_subtract_kernel(unsigned char* A, unsigned char* B, unsigned char* C, int height, int width);

@@ -38,7 +38,6 @@
 //#endif
 //#include <device_functions.h>
 
-// Std IO
 #include <stdio.h>
 
 // Image library
@@ -57,6 +56,7 @@
 // Execution parameters
 #define BILINEAR_INTERPOLATE_BLOCK_WIDTH 32
 #define BLUR_BLOCK_WIDTH 32
+#define SUBTRACT_BLOCK_WIDTH 32
 
 int main()
 {
@@ -89,16 +89,20 @@ int main()
 
     // Call parallel bilinear interpolate on device
     dev_bilinear_interpolate(dev_rawImage, &dev_InputImage, imgWidth, imgHeight, 2.0, &resultWidth, &resultHeight);
+    checkCuda(cudaFree(dev_rawImage));
 
     // Create the array of pyramid layers
     imagePyramidLayer pyramid[LAYERS];
     // This template is used to iteratively export layers as images, by replacing the placeholder 'X' with the layer index
     const char directoryTemplate[] = "../Layers/AX.png";
 
+    // Pointer to host-side output image for debugging
+    unsigned char* h_debug_img = NULL;
+
     // For each layer in pyramid, construct two images with increasing levels of blur, and compute the difference of gaussian (DoG)
     // Apply bilinear interpolation to the second of the two blurred images, and use that in the next iteration as the input image
     // Keep these images in DEVICE memory, and reference them via the pointers in the 'imagePyramidLayer' structs
-    for (int i = 0; i < 1; i++) {
+    for (int i = 0; i < LAYERS; i++) {
         // Copy directory name to layer
         for (int j = 0; j < 17; j++) {
             pyramid[i].layerOutputDir[j] = directoryTemplate[j];
@@ -108,27 +112,48 @@ int main()
         pyramid[i].height = resultHeight;
         pyramid[i].width = resultWidth;
 
-        // 2) Apply gaussian blur to the input image -> 'A'
-        // Allocate device memory for blurred image 'A'
+        // Allocate memory for blurred image A, B and DoG on device
         checkCuda(cudaMalloc(&pyramid[i].imageA, resultWidth * resultHeight * (int)sizeof(unsigned char)));
+        checkCuda(cudaMalloc(&pyramid[i].imageB, resultWidth * resultHeight * (int)sizeof(unsigned char)));
+        checkCuda(cudaMalloc(&pyramid[i].DoG, resultWidth * resultHeight * (int)sizeof(unsigned char)));
+
+        // 2) Apply gaussian blur to the input image -> 'A'
         // Parameters for generating gaussian kernel
         float sigma = sqrt(2);
         int kernelWidth = 9;
         // Call device kernel for guassian blur
         dev_gaussian_blur(dev_InputImage, pyramid[i].imageA, resultWidth, resultHeight, sigma, kernelWidth);
+        // DEBUG OUTPUT IMAGE
+        h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
+        checkCuda(cudaMemcpy(h_debug_img, pyramid[i].imageA, resultWidth * resultHeight * (int)sizeof(unsigned char), cudaMemcpyDeviceToHost));
+        stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
+        free(h_debug_img);
+
+        // 3) Apply gaussian blur to the image A -> 'B'
+        dev_gaussian_blur(pyramid[i].imageA, pyramid[i].imageB, resultWidth, resultHeight, sigma, kernelWidth);
+        // DEBUG OUTPUT IMAGE
+        h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
+        pyramid[i].layerOutputDir[10] = (char)'B';
+        checkCuda(cudaMemcpy(h_debug_img, pyramid[i].imageB, resultWidth * resultHeight * (int)sizeof(unsigned char), cudaMemcpyDeviceToHost));
+        stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
+        free(h_debug_img);
+
+        // 4) Subtract 'A' - 'B' -> 'DoG'
+        dev_matrix_subtract(pyramid[i].imageA, pyramid[i].imageB, pyramid[i].DoG, resultWidth, resultHeight);
+        // DEBUG OUTPUT IMAGE
+        h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
+        pyramid[i].layerOutputDir[10] = (char)'C';
+        checkCuda(cudaMemcpy(h_debug_img, pyramid[i].DoG, resultWidth * resultHeight * (int)sizeof(unsigned char), cudaMemcpyDeviceToHost));
+        stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
+        free(h_debug_img);
+
+        // 5) Apply bilinear interpolation to 'B' -> Image input for next layer
+        //    Skip for last iteration
+        checkCuda(cudaFree(dev_InputImage));
+        if (i < LAYERS - 1) {
+            dev_bilinear_interpolate(pyramid[i].imageB, &dev_InputImage, resultWidth, resultHeight, BILINEAR_INTERPOLATION_SPACING, &resultWidth, &resultHeight);
+        }
     }
-
-        // Allocate memory for blurred image A, B and DoG on device
-
-        // execute gaussian blur kernel -> image A
-
-        // execute gaussian blur kernel -> image B
-
-        // execute matrix subtract kernel -> DoG
-
-        // Allocate memory for expanded image for next layer
-
-        // execute bilinear interpolate kernel
 
     // Allocate memory for gradient maps on device
 
@@ -151,6 +176,26 @@ int main()
     // return status
 
     return 0;
+}
+
+
+void dev_calculate_gradient_maps() {
+    /*
+    * Calculates gradient magnitude and gradient orientation maps for each layer of the pyramid on device.
+    *
+    * See D. Lowe, section 3.1
+    */
+}
+
+void dev_matrix_subtract(unsigned char* dev_imgA, unsigned char* dev_imgB, unsigned char* dev_imgC, int width, int height) {
+    /*
+    * Computes matrix subraction 'A' - 'B' = 'C' with CUDA
+    */
+
+    dim3 DimGrid(height / SUBTRACT_BLOCK_WIDTH + 1, width / SUBTRACT_BLOCK_WIDTH + 1, 1);
+    dim3 DimBlock(SUBTRACT_BLOCK_WIDTH, SUBTRACT_BLOCK_WIDTH, 1);
+    matrix_subtract_kernel << <DimGrid, DimBlock >> > (dev_imgA, dev_imgB, dev_imgC, height, width);
+    checkCuda(cudaDeviceSynchronize());
 }
 
 void dev_gaussian_blur(unsigned char* img, unsigned char* outputArray, int inputWidth, int inputHeight, float sigma, int kernelWidth) {
@@ -179,12 +224,6 @@ void dev_gaussian_blur(unsigned char* img, unsigned char* outputArray, int input
 
     gaussian_blur_kernel << <DimGrid, DimBlock, kernelWidth* kernelWidth * (int)sizeof(float) >> > (img, outputArray, dev_kernel, inputHeight, inputWidth, kernelWidth);
     checkCuda(cudaDeviceSynchronize());
-
-    // DEBUG OUTPUT
-    unsigned char* blurred = (unsigned char*)malloc(inputHeight * inputWidth * (int)sizeof(unsigned char));
-    checkCuda(cudaMemcpy(blurred, outputArray, inputHeight * inputWidth * (int)sizeof(unsigned char), cudaMemcpyDeviceToHost));
-    const char directoryTemplate[] = "../Layers/BlurredA.png";
-    stbi_write_png(directoryTemplate, inputWidth, inputHeight, 1, blurred, inputWidth * 1);
     
     free(kernel);
 }
@@ -333,6 +372,19 @@ __global__ void gaussian_blur_kernel(unsigned char* input, unsigned char* output
 
 __global__ void matrix_subtract_kernel(unsigned char* A, unsigned char* B, unsigned char* C, int height, int width) {
     // Subtract corresponding values in A and B and store in C
+    int col = blockDim.x * blockIdx.x + threadIdx.x;
+    int row = blockDim.y * blockIdx.y + threadIdx.y;
+    int idx = row * width + col;
+
+    if (row < width && col < height) {
+        int pixVal = A[idx] - B[idx];
+        if (pixVal > 0) {
+            C[idx] = (unsigned char)pixVal;
+        }
+        else {
+            C[idx] = 0;
+        }
+    }
 }
 
 __global__ void gradient_map_kernel(unsigned char* input, float* magnitudeMap, float* orientationMap, int height, int width) {
