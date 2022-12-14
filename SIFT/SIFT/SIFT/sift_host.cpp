@@ -540,7 +540,7 @@ void get_gaussian_kernel(float** kernel, float sigma, int kernelWidth) {
 	int kernelRadius = floor(kernelWidth / 2);
 	for (int i = 0; i < kernelWidth; i++) {
 		int x = i - kernelRadius; // Center range of x around 0
-		blurKernel1D[i] = 1 / (sqrt(2 * PI) * sigma) * exp(-(x * x) / (2 * sigma * sigma));
+		blurKernel1D[i] = (float)(1 / (sqrt(2 * PI) * sigma) * exp(-(x * x) / (2 * sigma * sigma)));
 	}
 
 	// Build 2D blur kernel from 1D kernel coefficients

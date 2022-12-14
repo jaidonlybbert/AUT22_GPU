@@ -54,6 +54,10 @@
 #include "sift_device.cuh"
 #include "../util/cuda_helpers.h"
 
+// Execution parameters
+#define BILINEAR_INTERPOLATE_BLOCK_WIDTH 32
+#define BLUR_BLOCK_WIDTH 32
+
 int main()
 {
     cudaError_t cudaStatus;
@@ -65,7 +69,7 @@ int main()
     int y_rows = 0;
     int n_pixdepth = 0;
     unsigned char* h_rawImage = stbi_load(filename, &x_cols, &y_rows, &n_pixdepth, 1);
-    int imgSize = x_cols * y_rows * sizeof(unsigned char);
+    int imgSize = x_cols * y_rows * (int)sizeof(unsigned char);
     int imgWidth = x_cols;
     int imgHeight = y_rows;
 
@@ -106,7 +110,7 @@ int main()
 
         // 2) Apply gaussian blur to the input image -> 'A'
         // Allocate device memory for blurred image 'A'
-        checkCuda(cudaMalloc(&pyramid[i].imageA, resultWidth * resultHeight * sizeof(unsigned char)));
+        checkCuda(cudaMalloc(&pyramid[i].imageA, resultWidth * resultHeight * (int)sizeof(unsigned char)));
         // Parameters for generating gaussian kernel
         float sigma = sqrt(2);
         int kernelWidth = 9;
@@ -150,7 +154,39 @@ int main()
 }
 
 void dev_gaussian_blur(unsigned char* img, unsigned char* outputArray, int inputWidth, int inputHeight, float sigma, int kernelWidth) {
+    /*
+    * Convolves inputArray with a Gaussian kernel defined by g(x) = 1 / (sqrt(2*pi) * sigma) * exp(-(x**2) / (2 * sigma**2))
+    *
+    * kernelWidth is assumed to be odd.
+    */
 
+    assert(kernelWidth % 2 == 1);
+
+    int kernelRadius = floor(kernelWidth / 2);
+
+    // Generate gaussian kernel
+    float* kernel = NULL;
+    float* dev_kernel = NULL;
+    get_gaussian_kernel(&kernel, sigma, kernelWidth);
+
+    // Move gaussian kernel to device
+    checkCuda(cudaMalloc(&dev_kernel, kernelWidth * kernelWidth * (int)sizeof(float)));
+    checkCuda(cudaMemcpy(dev_kernel, kernel, kernelWidth * kernelWidth * (int)sizeof(float), cudaMemcpyHostToDevice));
+
+    // Setup device grid
+    dim3 DimGrid(inputHeight / BLUR_BLOCK_WIDTH + 1, inputWidth / BLUR_BLOCK_WIDTH + 1, 1);
+    dim3 DimBlock(BLUR_BLOCK_WIDTH, BLUR_BLOCK_WIDTH, 1);
+
+    gaussian_blur_kernel << <DimGrid, DimBlock, kernelWidth* kernelWidth * (int)sizeof(float) >> > (img, outputArray, dev_kernel, inputHeight, inputWidth, kernelWidth);
+    checkCuda(cudaDeviceSynchronize());
+
+    // DEBUG OUTPUT
+    unsigned char* blurred = (unsigned char*)malloc(inputHeight * inputWidth * (int)sizeof(unsigned char));
+    checkCuda(cudaMemcpy(blurred, outputArray, inputHeight * inputWidth * (int)sizeof(unsigned char), cudaMemcpyDeviceToHost));
+    const char directoryTemplate[] = "../Layers/BlurredA.png";
+    stbi_write_png(directoryTemplate, inputWidth, inputHeight, 1, blurred, inputWidth * 1);
+    
+    free(kernel);
 }
 
 void dev_bilinear_interpolate(unsigned char* inputArray, unsigned char** dev_ExpandedImage, int inputWidth, int inputHeight,
@@ -167,17 +203,18 @@ void dev_bilinear_interpolate(unsigned char* inputArray, unsigned char** dev_Exp
     int expandedHeight = ceil(inputHeight * spacing);
     int expandedWidth = ceil(inputWidth * spacing);
     int expandedLength = expandedHeight * expandedWidth;
-    checkCuda(cudaMalloc((void **)dev_ExpandedImage, expandedLength * sizeof(unsigned char)));
+    checkCuda(cudaMalloc((void **)dev_ExpandedImage, expandedLength * (int)sizeof(unsigned char)));
 
     // Report the new width and height back to the main loop, for future use
     *resultWidth = expandedWidth;
     *resultHeight = expandedHeight;
 
     // Launch device kernel
-    dim3 DimGrid(expandedHeight / 32 + 1, expandedWidth / 32 + 1, 1);
-    dim3 DimBlock(32, 32, 1);
+    dim3 DimGrid(expandedHeight / BILINEAR_INTERPOLATE_BLOCK_WIDTH + 1, expandedWidth / BILINEAR_INTERPOLATE_BLOCK_WIDTH + 1, 1);
+    dim3 DimBlock(BILINEAR_INTERPOLATE_BLOCK_WIDTH, BILINEAR_INTERPOLATE_BLOCK_WIDTH, 1);
+    int tileWidth = ceil(BILINEAR_INTERPOLATE_BLOCK_WIDTH / spacing) + 1;
 
-    bilinear_interpolate_kernel<<<DimGrid, DimBlock>>>(inputArray, *dev_ExpandedImage, spacing, inputWidth, inputHeight, expandedWidth, expandedHeight);
+    bilinear_interpolate_kernel<<<DimGrid, DimBlock, tileWidth * tileWidth * (int)sizeof(unsigned char) >> >(inputArray, *dev_ExpandedImage, spacing, inputWidth, inputHeight, expandedWidth, expandedHeight, tileWidth);
     checkCuda(cudaDeviceSynchronize());
 
     // DEBUG OUTPUT
@@ -187,9 +224,12 @@ void dev_bilinear_interpolate(unsigned char* inputArray, unsigned char** dev_Exp
     stbi_write_png(directoryTemplate, expandedWidth, expandedHeight, 1, expanded, expandedWidth * 1);
 }
 
-extern __shared__ unsigned char imageTile[];
-__global__ void bilinear_interpolate_kernel(unsigned char *input, unsigned char *output, float spacing, int inputWidth, int inputHeight, int resultWidth, int resultHeight)
+
+__global__ void bilinear_interpolate_kernel(unsigned char *input, unsigned char *output, float spacing, int inputWidth, int inputHeight, int resultWidth, int resultHeight, int inputTileWidth)
 {
+    // Dynamically allocate shared memory for image tile
+    extern __shared__ unsigned char imageTile[];
+
     // Calculate row & col relative to output image
     int OutputRow = blockDim.y * blockIdx.y + threadIdx.y;
     int OutputCol = blockDim.x * blockIdx.x + threadIdx.x;
@@ -197,7 +237,6 @@ __global__ void bilinear_interpolate_kernel(unsigned char *input, unsigned char 
     // Collaboratively load section of input image into shared memory
     int topLeftX = floor((double)(blockDim.x / spacing * blockIdx.x));
     int topLeftY = floor((double)(blockDim.y / spacing * blockIdx.y));
-    int inputTileWidth = ceil((double)(blockDim.x / spacing)) + 1;
 
     if (threadIdx.x < inputTileWidth && OutputRow < resultHeight && threadIdx.y < inputTileWidth && OutputCol < resultWidth) {
         imageTile[threadIdx.y * inputTileWidth + threadIdx.x] = input[(topLeftY + threadIdx.y) * inputWidth + topLeftX + threadIdx.x];
@@ -251,15 +290,45 @@ __global__ void bilinear_interpolate_kernel(unsigned char *input, unsigned char 
     }
 }
 
-__global__ void gaussian_blur_kernel(unsigned char* input, unsigned char* output, float* gaussianKernel, int height, int width, int kernelDim, float kernelSum) {
-    // Collaboratively load input image to shared memory
+__global__ void gaussian_blur_kernel(unsigned char* input, unsigned char* output, float* gaussianKernel, int height, int width, int kernelDim) {
+    // Dynamically allocate memory for blur kernel
+    extern __shared__ float s_blurFilt[];
+    
+    // Compute thread coordinates
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int filtPadding = (kernelDim - 1) / 2;
 
-    // Iterate over area determined by kernelDim
-       // check boundaries
-        // Accumulate convolution sum
+    // Copy filter coefficients from global -> shared memory using first threads of the block
+    if (threadIdx.x < kernelDim && threadIdx.y < kernelDim) {
+        s_blurFilt[threadIdx.y * kernelDim + threadIdx.x] = gaussianKernel[threadIdx.y * kernelDim + threadIdx.x];
+    }
+    __syncthreads();
 
-    // Calculate normalized convolution result
-    // and store in output
+    // Apply the filter to the image
+    if (col < width && row < height) {
+        float pixFloatVal = 0.0;
+        float pixNormalizeFactor = 0.0;
+        int pixVal = 0;
+        int pixels = 0;
+
+        // Get the weighted average of the surrounding pixels using the gaussian blur filter
+        int curRow = 0;
+        int curCol = 0;
+        for (int blurRow = -filtPadding; blurRow < filtPadding + 1; ++blurRow) {
+            for (int blurCol = -filtPadding; blurCol < filtPadding + 1; ++blurCol) {
+                curRow = row + blurRow;
+                curCol = col + blurCol;
+                // Verify we have a valid image pixel
+                if (curRow > -1 && curRow < height && curCol > -1 && curCol < width) {
+                    pixFloatVal += (float)(input[curRow * width + curCol] * s_blurFilt[(blurRow + filtPadding) * kernelDim + blurCol + filtPadding]);
+                    pixNormalizeFactor += s_blurFilt[(blurRow + filtPadding) * kernelDim + blurCol + filtPadding]; // Accumulate a factor to normalize by
+                }
+            }
+        }
+        // Write our new pixel value out
+        output[row * width + col] = (unsigned char)(int)(pixFloatVal / pixNormalizeFactor);
+    }
 }
 
 __global__ void matrix_subtract_kernel(unsigned char* A, unsigned char* B, unsigned char* C, int height, int width) {
