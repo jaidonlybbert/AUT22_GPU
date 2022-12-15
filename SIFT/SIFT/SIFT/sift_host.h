@@ -20,6 +20,7 @@ struct imagePyramidLayer {
 	unsigned char* DoG;         // Difference of Gaussian (A-B)
 	float* gradientMagnitudeMap; // Map of same dimensions as layer
 	int* gradientOrientationMap; // Map of same dimension as layer
+	int* keyMask;
 	int height;                 // Hieght of images in layer
 	int width;                  // Width of images in layer
 	char layerOutputDir[17];    // Directory to save images for layer

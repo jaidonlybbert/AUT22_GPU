@@ -329,7 +329,7 @@ void characterize_keypoint(keypoint* keypoints, imagePyramidLayer pyramid[LAYERS
 				float weight = gaussian_kernel[(i + kernelRadius) * kernelWidth + (j + kernelRadius)];
 
 				if (ycoord + i < width && ycoord + i > 0 && xcoord + j < width && xcoord + j > 0) {
-					float orientation = pyramid[layer].imageA[(ycoord + i) * width + (xcoord + j)];
+					float orientation = pyramid[layer].gradientOrientationMap[(ycoord + i) * width + (xcoord + j)];
 					int bin = floor(orientation / 10);
 					orientationHistogram[bin] += weight;
 				}

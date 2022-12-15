@@ -57,6 +57,8 @@
 #define BILINEAR_INTERPOLATE_BLOCK_WIDTH 32
 #define BLUR_BLOCK_WIDTH 32
 #define SUBTRACT_BLOCK_WIDTH 32
+#define MAP_BLOCK_WIDTH 32
+#define HISTOGRAM_KERNEL_WIDTH 5
 
 int main()
 {
@@ -116,6 +118,12 @@ int main()
         checkCuda(cudaMalloc(&pyramid[i].imageA, resultWidth * resultHeight * (int)sizeof(unsigned char)));
         checkCuda(cudaMalloc(&pyramid[i].imageB, resultWidth * resultHeight * (int)sizeof(unsigned char)));
         checkCuda(cudaMalloc(&pyramid[i].DoG, resultWidth * resultHeight * (int)sizeof(unsigned char)));
+        checkCuda(cudaMalloc(&pyramid[i].gradientMagnitudeMap, resultWidth * resultHeight * (int)sizeof(float)));
+        checkCuda(cudaMalloc(&pyramid[i].gradientOrientationMap, resultWidth * resultHeight * (int)sizeof(int)));
+  
+        if (i > 0 && i < LAYERS - 1) {
+            checkCuda(cudaMalloc(&pyramid[i].keyMask, resultWidth * resultHeight * (int)sizeof(int)));
+        }
 
         // 2) Apply gaussian blur to the input image -> 'A'
         // Parameters for generating gaussian kernel
@@ -147,7 +155,10 @@ int main()
         stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
         free(h_debug_img);
 
-        // 5) Apply bilinear interpolation to 'B' -> Image input for next layer
+        // 5) Compute gradient maps
+        dev_calculate_gradient_maps(pyramid[i].imageA, pyramid[i].gradientMagnitudeMap, pyramid[i].gradientOrientationMap, resultWidth, resultHeight);
+
+        // 6) Apply bilinear interpolation to 'B' -> Image input for next layer
         //    Skip for last iteration
         checkCuda(cudaFree(dev_InputImage));
         if (i < LAYERS - 1) {
@@ -155,36 +166,204 @@ int main()
         }
     }
 
-    // Allocate memory for gradient maps on device
-
-    // Execute gradient map kernel
-
-    // Allocate memory for pyramid on host
-
-    // Copy pyramid to host
-
-    // Execute host-side extrema indexing function to build keypoint list
-
-    // Execute host-side keypoint characterize function
-
-    // Execute host-side annotation function
-
-    // Load host-verification annotated image
-
-    // Compare device and host annotated image pix by pix for verification
-
-    // return status
+    // 7) Collect local maxima and minima coordinates in scale space, and mark them in the 'keyMask' of each layer
+    dev_generate_key_masks(pyramid);
 
     return 0;
 }
 
+void dev_generate_key_orientation_map(imagePyramidLayer pyramid[LAYERS]) {
+    // For each keypoint, accumulate a histogram of local image gradient orientations using a Gaussian - weighted window
+    //		with 'sigma' of 3 times that of the current smoothing scale
+    //		Each histogram consists of 36 bins covering the 360 degree range of rotations. The peak of the histogram
+    //      is stored for each keypoint as its canonical orientation.
 
-void dev_calculate_gradient_maps() {
+    for (int i = 1; i < LAYERS - 1; i++) {
+
+    }
+
+}
+
+void dev_generate_key_masks(imagePyramidLayer pyramid[LAYERS]) {
+    /*
+    * Searches pyramid structure for local extrema or 'keypoints'. Each pixel is evaluated against its nearest neighbors in scale space.
+    *
+    * The key mask is initialized as all zeroes and matches the dimensions of the image layer.
+    * Locations of keypoints in each layer are marked with a value of 255 in the keypoint mask.
+    */
+    for (int i = 1; i < LAYERS - 1; i++) {
+        // Generate gaussian weight kernel for layer, used in histogram to determine keypoint orientation
+        // A gaussian kernel is used for the weighted histogram
+        // The 'sigma' parameter is based on the layers level of blur
+        float sigma = (3 * sqrt(2) * i * 2);
+        int kernelWidth = HISTOGRAM_KERNEL_WIDTH;
+        int kernelRadius = floor(kernelWidth / 2);
+        float* gaussian_kernel = NULL;
+        float* dev_gaussian_kernel = NULL;
+        // Get the 2d gaussian kernel
+        get_gaussian_kernel(&gaussian_kernel, sigma, kernelWidth);
+        // Move kernel to device
+        checkCuda(cudaMalloc(&dev_gaussian_kernel, kernelWidth * kernelWidth * (int)sizeof(float)));
+        checkCuda(cudaMemcpy(dev_gaussian_kernel, gaussian_kernel, kernelWidth * kernelWidth * (int)(sizeof(float)), cudaMemcpyHostToDevice));
+
+        dim3 DimGrid(pyramid[i].height / MAP_BLOCK_WIDTH + 1, pyramid[i].width / MAP_BLOCK_WIDTH + 1, 1);
+        dim3 DimBlock(MAP_BLOCK_WIDTH, MAP_BLOCK_WIDTH, 1);
+        generate_key_mask_kernel<<<DimGrid, DimBlock>>>(pyramid[i].DoG, pyramid[i + 1].DoG, pyramid[i - 1].DoG, pyramid[i].gradientOrientationMap, pyramid[i].keyMask, dev_gaussian_kernel, pyramid[i].width, pyramid[i].height);
+        checkCuda(cudaDeviceSynchronize());
+
+        //-----------DEBUG OUTPUT------------
+        int* h_keymask = (int*)malloc(pyramid[i].width * pyramid[i].height * sizeof(int));
+        checkCuda(cudaMemcpy(h_keymask, pyramid[i].keyMask, pyramid[i].height * pyramid[i].width * (int)sizeof(int), cudaMemcpyDeviceToHost));
+        int keypointCount = 0;
+        for (int i = 0; i < pyramid[i].height * pyramid[i].width; i++) {
+            if (h_keymask[i] != -1) {
+                keypointCount++;
+            }
+        }
+        free(h_keymask);
+        printf("Layer %d keypoints: %d\n", i, keypointCount);
+    }
+}
+
+__global__ void generate_key_mask_kernel(unsigned char* dev_DoG, unsigned char* dev_DoG_below, unsigned char* dev_DoG_above, int* dev_orientation_map, int* dev_keymask, float* dev_gaussian_kernel, int width, int height) {
+
+    int row = blockDim.y * blockIdx.y + threadIdx.y;
+    int col = blockDim.x * blockIdx.x + threadIdx.x;
+    int idx = row * width + col;
+
+    unsigned char minVal = 255;
+    unsigned char maxVal = 0;
+
+    unsigned char neighborPixVal = 0;
+    unsigned char pixVal = dev_DoG[idx];
+
+    // Exclude edges
+    if (row > 0 && row < height - 1 && col > 0 && col < height - 1) {
+        // Check pixel value against neighboring pixel values in the same layer
+        for (int x = -1; x <= 1; x++) {
+            for (int y = -1; y <= 1; y++) {
+                neighborPixVal = dev_DoG[(row + y) * width + (col + x)];
+
+                if (x != 0 && y != 0) {
+                    if (neighborPixVal < minVal) {
+                        minVal = neighborPixVal;
+                    }
+                    else if (neighborPixVal > maxVal) {
+                        maxVal = neighborPixVal;
+                    }
+                }
+            }
+        }
+
+        // If the pixel value is an extrema of the current layer, check against pixels in layer below
+        if (pixVal < minVal || pixVal > maxVal) {
+
+            int xcoordBelow = col * BILINEAR_INTERPOLATION_SPACING;
+            int ycoordBelow = row * BILINEAR_INTERPOLATION_SPACING;
+            int widthBelow = ceil((double)width * BILINEAR_INTERPOLATION_SPACING);
+            int heightBelow = ceil((double)height * BILINEAR_INTERPOLATION_SPACING);
+
+            for (int r = -1; r <= 1; r++) {
+                for (int s = -1; s <= 1; s++) {
+                    if (ycoordBelow + r > 0 && ycoordBelow + r < heightBelow && xcoordBelow + s > 0 && xcoordBelow + s < widthBelow) {
+                        neighborPixVal = dev_DoG_below[(ycoordBelow + r) * widthBelow + (xcoordBelow + s)];
+                    }
+
+                    if (neighborPixVal < minVal) {
+                        minVal = neighborPixVal;
+                    }
+                    else if (neighborPixVal > maxVal) {
+                        maxVal = neighborPixVal;
+                    }
+                }
+            }
+        }
+
+        // If the pixel value is still an extrema, check against pixels in layer above
+        if (pixVal < minVal || pixVal > maxVal) {
+            int xcoordAbove = col / BILINEAR_INTERPOLATION_SPACING;
+            int ycoordAbove = row / BILINEAR_INTERPOLATION_SPACING;
+            int widthAbove = floor((double)width / BILINEAR_INTERPOLATION_SPACING);
+            int heightAbove = floor((double)height / BILINEAR_INTERPOLATION_SPACING);
+
+            for (int r = -1; r <= 1; r++) {
+                for (int s = -1; s <= 1; s++) {
+                    if (ycoordAbove + r > 0 && ycoordAbove + r < heightAbove && xcoordAbove + s > 0 && xcoordAbove + s < widthAbove) {
+                        neighborPixVal = dev_DoG_above[(ycoordAbove + r) * widthAbove + (xcoordAbove + s)];
+                    }
+
+                    if (neighborPixVal < minVal) {
+                        minVal = neighborPixVal;
+                    }
+                    else if (neighborPixVal > maxVal) {
+                        maxVal = neighborPixVal;
+                    }
+                }
+            }
+        }
+
+        // If the pixel is still an extrema, it is a keypoint.
+        // Call child kernel to determine orientation of keypoint.
+        if (pixVal < minVal || pixVal > maxVal) {
+            dim3 GridDim(1, 1, 1);
+            dim3 BlockDim(HISTOGRAM_KERNEL_WIDTH, HISTOGRAM_KERNEL_WIDTH, 1);
+            orientation_histogram_kernel<<<GridDim, BlockDim>>>(dev_keymask, dev_orientation_map, dev_gaussian_kernel, width, height, col, row);
+        }
+        else {
+            dev_keymask[idx] = -1; // Negative indicates no keypoint
+        }
+    }
+}
+
+__global__ void orientation_histogram_kernel(int* keyMask, int* orientationMap, float* gaussianKernel, int width, int height, int x, int y) {
+    // Create histogram shared between threads
+    __shared__ float orientation_histogram[36];
+
+    // Assumes CUDA kernel dimensions are equal to gaussian weight kernel dimensions.
+    int kernelRadius = floor((double)blockDim.x / 2.0);
+
+    // Coordinates of thread relative to the orientation map dimensions
+    int row = blockDim.y * blockIdx.y + threadIdx.y + y - kernelRadius;
+    int col = blockDim.x * blockIdx.x + threadIdx.x + y - kernelRadius;
+    int map_idx = row * width + col;
+    int gaussianKernelIdx = threadIdx.y * blockDim.x + threadIdx.x;
+    float weight = gaussianKernel[gaussianKernelIdx];
+
+    if (row < height && row > 0 && col > 0 && col < width) {
+        float orientation = orientationMap[map_idx];
+        int bin = floor(orientation / 10);
+        orientation_histogram[bin] += weight;
+    }
+
+    __syncthreads();
+
+    // Find the peak of the gradient orientation histogram (naive)
+    float maxVal = 0;
+    int maxBin = 0;
+
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        for (int i = 0; i < 36; i++) {
+            if (orientation_histogram[i] > maxVal) {
+                maxVal = orientation_histogram[i];
+                maxBin = i;
+            }
+        }
+
+        keyMask[map_idx] = maxBin * 10;
+    }
+}
+
+void dev_calculate_gradient_maps(unsigned char* baseImage, float* gradientMagnitudeMap, int* gradientOrientationMap, int width, int height) {
     /*
     * Calculates gradient magnitude and gradient orientation maps for each layer of the pyramid on device.
     *
     * See D. Lowe, section 3.1
     */
+
+    dim3 DimGrid(height / MAP_BLOCK_WIDTH + 1, width / MAP_BLOCK_WIDTH + 1, 1);
+    dim3 DimBlock(MAP_BLOCK_WIDTH, MAP_BLOCK_WIDTH, 1);
+    gradient_map_kernel<<<DimGrid, DimBlock>>>(baseImage, gradientMagnitudeMap, gradientOrientationMap, height, width);
+    checkCuda(cudaDeviceSynchronize());
 }
 
 void dev_matrix_subtract(unsigned char* dev_imgA, unsigned char* dev_imgB, unsigned char* dev_imgC, int width, int height) {
@@ -387,11 +566,20 @@ __global__ void matrix_subtract_kernel(unsigned char* A, unsigned char* B, unsig
     }
 }
 
-__global__ void gradient_map_kernel(unsigned char* input, float* magnitudeMap, float* orientationMap, int height, int width) {
-    // collaboratively load input into shared memory
-    // store right pixval in register
-    // store below pixval in register
-    // check boundaries
-        // compute gradient magnitude and store in magnitudemap
-        // compute gradient orientation and store in orientationmap
+__global__ void gradient_map_kernel(unsigned char* dev_input, float* magnitudeMap, int* orientationMap, int height, int width) {
+    
+    int col = blockDim.x * blockIdx.x + threadIdx.x;
+    int row = blockDim.y * blockIdx.y + threadIdx.y;
+    int idx = row * width + col;
+
+    if (row < height - 1 && col < width - 1) {
+        unsigned char pixVal = dev_input[idx];
+        unsigned char belowPixVal = dev_input[idx + width];
+        unsigned char rightPixVal = dev_input[idx + 1];
+        
+        double temp1 = pixVal - belowPixVal;
+        double temp2 = pixVal - rightPixVal;
+        magnitudeMap[idx] = sqrt(temp1 * temp1 + temp2 * temp2);
+        orientationMap[idx] = floor(atan2(temp1, (double)(rightPixVal - pixVal)));
+    }
 }
