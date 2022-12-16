@@ -261,7 +261,7 @@ void dev_sift(unsigned char* dev_rawImage, unsigned char** dev_outputImage, int 
         checkCuda(cudaMalloc(&pyramid[i].gradientOrientationMap, resultWidth * resultHeight * (int)sizeof(int)));
         // Allocate memory for keymasks for inner layers
         if (i > 0 && i < LAYERS - 1) {
-            checkCuda(cudaMalloc(&pyramid[i].keyMask, resultWidth * resultHeight * (int)sizeof(int)));
+            checkCuda(cudaMalloc(&pyramid[i].keyMask, resultWidth * resultHeight * (int)sizeof(unsigned char)));
         }
 
         // 2) Apply gaussian blur to the input image -> 'A'
@@ -365,7 +365,21 @@ void dev_sift(unsigned char* dev_rawImage, unsigned char** dev_outputImage, int 
     nvtxMark("Find keypoints and draw them on output image.");
     dev_generate_key_masks(pyramid, dev_PyramidInput, pyramidInputWidth, pyramidInputHeight);
 
-    printf("- Done.");
+    // DEBUG write keymasks to disk
+    const char dev_keyMask1[] = "../Layers/devKeyMask1.png";
+    const char dev_keyMask2[] = "../Layers/devKeyMask2.png";
+    h_debug_img = (unsigned char*)malloc(pyramid[1].width * pyramid[1].height * (int)sizeof(unsigned char));
+    checkCuda(cudaMemcpy(h_debug_img, pyramid[1].keyMask, pyramid[1].width* pyramid[1].height* (int)sizeof(unsigned char),
+        cudaMemcpyDeviceToHost));
+    stbi_write_png(dev_keyMask1, pyramid[1].width, pyramid[1].height, 1, h_debug_img, pyramid[1].width * 1);
+    free(h_debug_img);
+    h_debug_img = (unsigned char*)malloc(pyramid[2].width * pyramid[2].height * (int)sizeof(unsigned char));
+    checkCuda(cudaMemcpy(h_debug_img, pyramid[2].keyMask, pyramid[2].width* pyramid[2].height* (int)sizeof(unsigned char),
+        cudaMemcpyDeviceToHost));
+    stbi_write_png(dev_keyMask2, pyramid[2].width, pyramid[2].height, 1, h_debug_img, pyramid[2].width * 1);
+    free(h_debug_img);
+
+    printf("- Done.\n");
 }
 
 void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int imgSize, int imgWidth, int imgHeight, 
@@ -395,6 +409,8 @@ void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int img
 	// This template is used to iteratively export layers as images, by replacing the placeholder 'X' with the layer index
 	const char directoryTemplate[] = "../Layers/AX.png";
 
+    printf("- Building pyramid...\n");
+
 	// For each layer in pyramid, construct two images with increasing levels of blur, and compute the difference of gaussian (DoG)
 	// Apply bilinear interpolation to the second of the two blurred images, and use that in the next iteration as the input image
 	// Keep these images in memory, and reference them via the pointers in the 'imagePyramidLayer' structs
@@ -408,6 +424,12 @@ void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int img
 		pyramid[i].layerOutputDir[11] = (char)('0' + (char)i);
 		pyramid[i].height = resultHeight;
 		pyramid[i].width = resultWidth;
+
+        // Allocate memory for keymasks for inner layers
+        if (i > 0 && i < LAYERS - 1) {
+            pyramid[i].keyMask = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
+            for (int j = 0; j < resultWidth * resultHeight; j++) { pyramid[i].keyMask[j] = 255; }
+        }
 
 		// 2) Apply gaussian blur to the input image -> 'A'
 		pyramid[i].imageA = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
@@ -444,8 +466,6 @@ void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int img
 			BILINEAR_INTERPOLATION_SPACING, &resultWidth, &resultHeight);
 	}
 
-    printf("- Image pyramid finished.\n");
-
 	// 6) Collect local maxima and minima coordinates in scale space (x, y, layer) -> 'keypoints'
 	// Start the linked list of keypoints
 	keypoint* keypoints = NULL;
@@ -477,6 +497,12 @@ void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int img
     *h_outputImage = annotatedImage;
 
     printf("- Done.\n");
+
+    // DEBUG write keymasks to disk
+    const char host_keyMask1[] = "../Layers/hostKeyMask1.png";
+    const char host_keyMask2[] = "../Layers/hostKeyMask2.png";
+    stbi_write_png(host_keyMask1, pyramid[1].width, pyramid[1].height, 1, pyramid[1].keyMask, pyramid[1].width * 1);
+    stbi_write_png(host_keyMask2, pyramid[2].width, pyramid[2].height, 1, pyramid[2].keyMask, pyramid[2].width * 1);
 
 	//while (keypoints->next != NULL) {
 	//	printf("Layer: %d, X: %d, Y: %d, Rotation: %d\n", keypoints->layer, keypoints->x, keypoints->y, keypoints->orientation);

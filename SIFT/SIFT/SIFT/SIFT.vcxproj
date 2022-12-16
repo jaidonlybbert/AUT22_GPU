@@ -82,7 +82,11 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\util\cuda_helpers.h" />
+    <ClInclude Include="sift_device.cuh" />
     <ClInclude Include="sift_host.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="sift_device.cu" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -162,7 +162,7 @@ void find_extrema(imagePyramidLayer pyramid[LAYERS], keypoint** keypoints) {
 					for (int y = -1; y <= 1; y++) {
 						neighborPixVal = pyramid[i].DoG[(j + y) * pyramid[i].width + (k + x)];
 
-						if (x != 0 && y != 0) {
+						if (x != 0 || y != 0) {
 							if (neighborPixVal < minVal) {
 								minVal = neighborPixVal;
 							}
@@ -227,8 +227,8 @@ void find_extrema(imagePyramidLayer pyramid[LAYERS], keypoint** keypoints) {
 					currentKeypoint->layer = i;
 					// Bilinear interpolation spacing is constant between layers, so the coordinates
 					// relative to the input image can be computed by division of the spacing to the layer'th power
-					currentKeypoint->x = k / pow(BILINEAR_INTERPOLATION_SPACING, i);
-					currentKeypoint->y = j / pow(BILINEAR_INTERPOLATION_SPACING, i);
+					currentKeypoint->x = k;
+					currentKeypoint->y = j;
 
 					currentKeypoint->next = new keypoint;
 					keypoint* temp_previous = currentKeypoint;
@@ -307,8 +307,8 @@ void characterize_keypoint(keypoint* keypoints, imagePyramidLayer pyramid[LAYERS
 	while (keypoints->next != NULL) {
 		// grab pixel coordinates and image dimensions from the keypoint
 		int layer = keypoints->layer;
-		int xcoord = keypoints->x * pow(BILINEAR_INTERPOLATION_SPACING, layer);
-		int ycoord = keypoints->y * pow(BILINEAR_INTERPOLATION_SPACING, layer);
+		int xcoord = keypoints->x;
+		int ycoord = keypoints->y;
 		int width = pyramid[layer].width;
 		int height = pyramid[layer].height;
 		// Histogram to collect local orientations per keypoint
@@ -350,6 +350,7 @@ void characterize_keypoint(keypoint* keypoints, imagePyramidLayer pyramid[LAYERS
 
 		// Assign the gradient values to the keypoint
 		keypoints->orientation = maxBin * 10;
+		pyramid[layer].keyMask[ycoord * width + xcoord] = maxBin;
 		if (ycoord < height && xcoord < width && ycoord >= 0 && xcoord >= 0) {
 			keypoints->magnitude = pyramid[layer].gradientMagnitudeMap[ycoord * width + xcoord];
 		}
@@ -515,9 +516,10 @@ void draw_keypoints(keypoint* keypoints, unsigned char* inputImage, unsigned cha
 		//	keypoints = keypoints->next;
 		//	continue;
 		//}
-
-		int x = keypoints->x - annotationRadius;
-		int y = keypoints->y - annotationRadius;
+		int inputX = keypoints->x * pow(BILINEAR_INTERPOLATION_SPACING, -keypoints->layer);
+		int inputY = keypoints->y * pow(BILINEAR_INTERPOLATION_SPACING, -keypoints->layer);
+		int x = inputX - annotationRadius;
+		int y = inputY - annotationRadius;
 		unsigned char* annotation = keypoints->graphic;
 		for (int i = 0; i < annotationWidth; i++) {
 			for (int j = 0; j < annotationWidth; j++) {
@@ -529,7 +531,7 @@ void draw_keypoints(keypoint* keypoints, unsigned char* inputImage, unsigned cha
 		keypoints = keypoints->next;
 		keypointCount++;
 	}
-	printf("Keypoints count: %d\n", keypointCount);
+	printf("- Keypoints count: %d\n", keypointCount);
 }
 
 void get_gaussian_kernel(float** kernel, float sigma, int kernelWidth) {

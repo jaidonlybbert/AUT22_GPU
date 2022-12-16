@@ -15,7 +15,7 @@ __global__ void matrix_subtract_kernel(unsigned char* A, unsigned char* B, unsig
 __global__ void gradient_map_kernel(unsigned char* input, float* magnitudeMap, int* orientationMap, int height, int width);
 __global__ void generate_key_mask_kernel(imagePyramidLayer pyramid[LAYERS], float* dev_gaussian_kernel,
     int layer, unsigned char* dev_OutputImage, int outputWidth, int outputHeight);
-__global__ void orientation_histogram_kernel(int* keyMask, int* orientationMap, float* gaussianKernel, int width, int height, int x, int y, int idx);
-__global__ void draw_keypoint_kernel(unsigned char* dev_keypoint_template, unsigned char* dev_OutputImage, int* dev_keymask, int idx,
+__global__ void orientation_histogram_kernel(unsigned char* keyMask, int* orientationMap, float* gaussianKernel, int width, int height, int x, int y, int idx);
+__global__ void draw_keypoint_kernel(unsigned char* dev_keypoint_template, unsigned char* dev_OutputImage, unsigned char* dev_keymask, int idx,
     int row, int col, int layer, int outputWidth, int outputHeight);
 #endif

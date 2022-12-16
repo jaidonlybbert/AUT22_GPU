@@ -92,17 +92,17 @@ void dev_generate_key_masks(imagePyramidLayer pyramid[LAYERS],
         //printf("- Key mask generated.\n");
 
         //-----------DEBUG OUTPUT------------
-        //int* h_keymask = (int*)malloc(pyramid[i].width * pyramid[i].height * sizeof(int));
-        //checkCuda(cudaMemcpy(h_keymask, pyramid[i].keyMask, pyramid[i].height * pyramid[i].width * (int)sizeof(int), 
-        //                     cudaMemcpyDeviceToHost));
-        //int keypointCount = 0;
-        //for (int j = 0; j < pyramid[i].height * pyramid[i].width; j++) {
-        //    if (h_keymask[j] != -1) {
-        //        keypointCount++;
-        //    }
-        //}
-        //free(h_keymask);
-        //printf("Layer %d keypoints: %d\n", i, keypointCount);
+        unsigned char* h_keymask = (unsigned char*)malloc(pyramid[i].width * pyramid[i].height * sizeof(unsigned char));
+        checkCuda(cudaMemcpy(h_keymask, pyramid[i].keyMask, pyramid[i].height * pyramid[i].width * (int)sizeof(unsigned char), 
+                             cudaMemcpyDeviceToHost));
+        int keypointCount = 0;
+        for (int j = 0; j < pyramid[i].height * pyramid[i].width; j++) {
+            if (h_keymask[j] != 255) {
+                keypointCount++;
+            }
+        }
+        free(h_keymask);
+        printf("- Layer %d keypoints: %d\n", i, keypointCount);
     }
 }
 
@@ -113,7 +113,7 @@ __global__ void generate_key_mask_kernel(imagePyramidLayer pyramid[LAYERS], floa
     unsigned char* dev_DoG_below = pyramid[layer + 1].DoG;
     unsigned char* dev_DoG_above = pyramid[layer - 1].DoG;
     int* dev_orientation_map = pyramid[layer].gradientOrientationMap;
-    int* dev_keymask = pyramid[layer].keyMask;
+    unsigned char* dev_keymask = pyramid[layer].keyMask;
     int width = pyramid[layer].width;
     int height = pyramid[layer].height;
 
@@ -141,7 +141,7 @@ __global__ void generate_key_mask_kernel(imagePyramidLayer pyramid[LAYERS], floa
             for (int y = -1; y <= 1; y++) {
                 neighborPixVal = dev_DoG[(row + y) * width + (col + x)];
 
-                if (x != 0 && y != 0) {
+                if (x != 0 || y != 0) {
                     if (neighborPixVal < minVal) {
                         minVal = neighborPixVal;
                     }
@@ -233,16 +233,16 @@ __global__ void generate_key_mask_kernel(imagePyramidLayer pyramid[LAYERS], floa
             }
         }
         else {
-            dev_keymask[idx] = -1; // Negative indicates no keypoint
+            dev_keymask[idx] = 255; // 255 indicates no keypoint
         }
     }
-    else if ((row == 0 || row == height - 1) && (col == 0 || col == height - 1)) {
-        dev_keymask[idx] = -1;
+    else if (row < height && row >= 0 && col < width && col >= 0) {
+        dev_keymask[idx] = 255;
     }
 }
 
 __global__ void draw_keypoint_kernel(unsigned char* dev_keypoint_template, unsigned char* dev_OutputImage, 
-     int* dev_keymask, int idx, int row, int col, int layer, int outputWidth, int outputHeight) {
+     unsigned char* dev_keymask, int idx, int row, int col, int layer, int outputWidth, int outputHeight) {
     // Orients and draws keypoint on output image
 
     // Scale row and column down to match base layer
@@ -250,7 +250,7 @@ __global__ void draw_keypoint_kernel(unsigned char* dev_keypoint_template, unsig
     col = col * pow((double)BILINEAR_INTERPOLATION_SPACING, -layer);
 
     // Pixel value
-    int orientation = dev_keymask[idx];
+    int orientation = (int)dev_keymask[idx] * 10;
     unsigned char pixVal = dev_keypoint_template[threadIdx.y * 17 + threadIdx.x];
     
     // Coordinates of thread centered at zero for rotation
@@ -295,12 +295,12 @@ __global__ void draw_keypoint_kernel(unsigned char* dev_keypoint_template, unsig
     //}
 
     // Write to output image
-    if (pixVal == 255 && outputRow < outputHeight && outputRow > 0 && outputCol < outputWidth && outputCol > 0) {
+    if (pixVal == 255 && outputRow < outputHeight && outputRow >= 0 && outputCol < outputWidth && outputCol >= 0) {
         dev_OutputImage[outputRow * outputWidth + outputCol] = pixVal;
     }
 }
 
-__global__ void orientation_histogram_kernel(int* keyMask, int* orientationMap, float* gaussianKernel, int width, 
+__global__ void orientation_histogram_kernel(unsigned char* keyMask, int* orientationMap, float* gaussianKernel, int width, 
     int height, int x, int y, int idx) {
     // For each keypoint, accumulate a histogram of local image gradient orientations using a Gaussian-weighted window
     //		with 'sigma' of 3 times that of the current smoothing scale
@@ -340,7 +340,7 @@ __global__ void orientation_histogram_kernel(int* keyMask, int* orientationMap, 
             }
         }
 
-        keyMask[idx] = maxBin * 10; // Orientation in degrees with resolution of 10 degrees
+        keyMask[idx] = maxBin; // Orientation as (degrees / 10) with resolution of 10 degrees
         /*printf("Orientation: %d\n", maxBin * 10);*/
     }
 }
