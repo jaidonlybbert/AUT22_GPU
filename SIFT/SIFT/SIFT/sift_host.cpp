@@ -95,7 +95,7 @@ void gaussian_blur(unsigned char* img, unsigned char* outputArray, int inputWidt
 				for (int z = 0; z < kernelWidth; z++) {
 					int vShift = k - kernelRadius;
 					int hShift = z - kernelRadius;
-					if ((i + vShift > 0) && (i + vShift < inputHeight) && (j + hShift > 0) && (j + hShift < inputWidth)) {
+					if ((i + vShift >= 0) && (i + vShift < inputHeight) && (j + hShift >= 0) && (j + hShift < inputWidth)) {
 						pixelConvolutionSum += img[(i + vShift) * inputWidth + (j + hShift)] * kernel[k * kernelWidth + z];
 						kernelCoefficientSum += kernel[k * kernelWidth + z];
 					}
@@ -328,10 +328,12 @@ void characterize_keypoint(keypoint* keypoints, imagePyramidLayer pyramid[LAYERS
 			for (int j = -kernelRadius; j <= kernelRadius; j++) {
 				float weight = gaussian_kernel[(i + kernelRadius) * kernelWidth + (j + kernelRadius)];
 
-				if (ycoord + i < width && ycoord + i > 0 && xcoord + j < width && xcoord + j > 0) {
+				if (ycoord + i < height && ycoord + i >= 0 && xcoord + j < width && xcoord + j >= 0) {
 					float orientation = pyramid[layer].gradientOrientationMap[(ycoord + i) * width + (xcoord + j)];
 					int bin = floor(orientation / 10);
-					orientationHistogram[bin] += weight;
+					if (bin < 36 && bin > 0) {
+						orientationHistogram[bin] += weight;
+					}
 				}
 			}
 		}
@@ -348,8 +350,13 @@ void characterize_keypoint(keypoint* keypoints, imagePyramidLayer pyramid[LAYERS
 
 		// Assign the gradient values to the keypoint
 		keypoints->orientation = maxBin * 10;
-		keypoints->magnitude = pyramid[layer].gradientMagnitudeMap[ycoord * width + xcoord];
-
+		if (ycoord < height && xcoord < width && ycoord >= 0 && xcoord >= 0) {
+			keypoints->magnitude = pyramid[layer].gradientMagnitudeMap[ycoord * width + xcoord];
+		}
+		else {
+			keypoints->magnitude = 0;
+		}
+		
 		// Move to next keypoint in the linked list
 		keypoints = keypoints->next;
 

@@ -56,17 +56,14 @@ __device__ __constant__ unsigned char dev_KeypointGraphic[289];
 void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int imgSize, int imgWidth, int imgHeight,
     int* outputWidth, int* outputHeight);
 
-void compare_images();
+void compare_images(unsigned char* a, unsigned char* b, int width, int height);
+void validate_output();
 
 int main() {
     /*
     * Comparison between host and device execution of the SIFT algorithm
     * for benchmarking with NVIDIA Nsight Systems
     */
-
-    printf("Comparing");
-    compare_images();
-    printf("Compare Done.");
 
 	nvtxMark("Program start!\n");
 	// 0) Load input image into an array -> 'inputArray'
@@ -119,36 +116,77 @@ int main() {
     const char hostAnnotatedDir[25] = "../Layers/HostOutput.png";
     stbi_write_png(hostAnnotatedDir, outputWidth, outputHeight, 1, h_outputImage, outputWidth * 1);
     free(h_outputImage);
-    nvtxMark("Program done.");
+    nvtxMark("Write complete.");
+
+    nvtxMark("Validating output.");
+    validate_output();
+    nvtxMark("Validation complete.");
 
     return 0;
 }
 
-void compare_images() {
-    const char filenameA[] = "../Layers/deviceInterp.png";
-    const char filenameB[] = "../Layers/hostinterp.png";
+void validate_output() {
+    // Compare all host output images to device output images pixel by pixel
+    printf("\n=====VALIDATION=====\n");
+    unsigned char* h_img = NULL;
+    unsigned char* d_img = NULL;
     int x_cols = 0;
     int y_rows = 0;
     int n_pixdepth = 0;
-    unsigned char* h_img = stbi_load(filenameA, &x_cols, &y_rows, &n_pixdepth, 1);
-    unsigned char* d_img = stbi_load(filenameB, &x_cols, &y_rows, &n_pixdepth, 1);
-    
-    for (int i = 0; i < y_rows; i++) {
-        for (int j = 0; j < x_cols; j++) {
-            unsigned char a = h_img[i * x_cols + j];
-            unsigned char b = d_img[i * x_cols + j];
 
-            if (a != b) {
-                printf("Mismatch: %d, Row: %d, Col: %d\n", (int)b - a, i, j);
+    const char h_inter[] = "../Layers/hostinterp.png";
+    const char d_inter[] = "../Layers/deviceInterp.png";
+    printf("- Comparing interpolated pyramid input...\n");
+    h_img = stbi_load(h_inter, &x_cols, &y_rows, &n_pixdepth, 1);
+    d_img = stbi_load(d_inter, &x_cols, &y_rows, &n_pixdepth, 1);
+    compare_images(h_img, d_img, x_cols, y_rows);
+
+    char directory[] = "../Layers/AX.png";
+
+    for (int i = 0; i < LAYERS; i++) {
+        for (int j = 0; j < 3; j++) {
+            printf("Comparing %c%d with %c%d...\n", ((char)'A' + j), i, ((char)'E' + j), i);
+            directory[10] = (char)'A' + j;
+            directory[11] = (char)('0' + (char)i);
+            h_img = stbi_load(directory, &x_cols, &y_rows, &n_pixdepth, 1);
+            directory[10] = (char)'E' + j;
+            d_img = stbi_load(directory, &x_cols, &y_rows, &n_pixdepth, 1);
+            compare_images(h_img, d_img, x_cols, y_rows);
+
+        }
+    }
+}
+
+void compare_images(unsigned char* a, unsigned char* b, int width, int height) {
+    int mismatchCount[3] = {0};
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            unsigned char tmp1 = a[i * width + j];
+            unsigned char tmp2 = b[i * width + j];
+            int error = abs(tmp1 - tmp2);
+
+            if (error == 1) {
+                //printf("- Mismatch: %d, Row: %d, Col: %d\n", (int)tmp1 - tmp2, i, j);
+                mismatchCount[0]++;
+            }
+            else if (error == 2) {
+                mismatchCount[1]++;
+            }
+            else if (error > 2) {
+                mismatchCount[2]++;
             }
         }
     }
+    printf("- Pixels with value errors = 1: %d\n", mismatchCount[0]);
+    printf("- Pixels with value errors = 2: %d\n", mismatchCount[1]);
+    printf("- Pixels with value errors > 2: %d\n", mismatchCount[2]);
 }
 
 void dev_sift(unsigned char* dev_rawImage, unsigned char** dev_outputImage, int imgSize, int imgWidth, int imgHeight,
     int* outputWidth, int* outputHeight)
 {
-    cudaError_t cudaStatus;
+    printf("\n=====DEVICE SIFT=====\n");
+
     unsigned char* dev_PyramidInput = 0;
     unsigned char* dev_LayerInput = 0;
 
@@ -186,7 +224,7 @@ void dev_sift(unsigned char* dev_rawImage, unsigned char** dev_outputImage, int 
 
     // Pointer to host-side output image for debugging
     unsigned char* h_debug_img = NULL;
-    int* h_debug_orientations = NULL;
+    //int* h_debug_orientations = NULL;
 
     // DEBUG OUTPUT IMAGE
     const char dev_interpimg[] = "../Layers/deviceInterp.png";
@@ -195,6 +233,8 @@ void dev_sift(unsigned char* dev_rawImage, unsigned char** dev_outputImage, int 
         cudaMemcpyDeviceToHost));
     stbi_write_png(dev_interpimg, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
     free(h_debug_img);
+
+    printf("- Building pyramid...\n");
 
     // For each layer in pyramid, construct two images with increasing levels of blur, and compute the difference of 
     // gaussian (DoG)
@@ -298,8 +338,6 @@ void dev_sift(unsigned char* dev_rawImage, unsigned char** dev_outputImage, int 
         }
     }
 
-    //printf("Pyramid generated successfully.\n");
-
     nvtxMark("Creating keypoint template");
     // Draw keypoint graphic template. This will be copied and rotated to match each keypoint orientation.
     unsigned char keypointGraphic[17][17] = { 0 };
@@ -323,14 +361,17 @@ void dev_sift(unsigned char* dev_rawImage, unsigned char** dev_outputImage, int 
 
     // 7) Collect local maxima and minima coordinates in scale space, and mark them in the 'keyMask' of each layer
     //    Use CUDA dynamic parallelism to draw keypoints on the output image
+    printf("- Generating key masks...\n");
     nvtxMark("Find keypoints and draw them on output image.");
     dev_generate_key_masks(pyramid, dev_PyramidInput, pyramidInputWidth, pyramidInputHeight);
 
-    //printf("Keys generated, and written to output image.");
+    printf("- Done.");
 }
 
 void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int imgSize, int imgWidth, int imgHeight, 
     int* outputWidth, int* outputHeight) {
+
+    printf("\n=====HOST SIFT=====\n");
 
 	// 1) Expand the input image via bilinear interpolation -> 'inputArrayExpanded'
 	//      This expanded image is the 'input' top layer of the image pyramid
@@ -402,38 +443,43 @@ void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int img
 		bilinear_interpolate(pyramid[i].imageB, &inputArrayExpanded, resultWidth, resultHeight, 
 			BILINEAR_INTERPOLATION_SPACING, &resultWidth, &resultHeight);
 	}
-	
+
+    printf("- Image pyramid finished.\n");
 
 	// 6) Collect local maxima and minima coordinates in scale space (x, y, layer) -> 'keypoints'
 	// Start the linked list of keypoints
 	keypoint* keypoints = NULL;
 	// Populate the linked list with all coordinates of extrema in the pyramid
 	
+    printf("- Indexing extrema...\n");
 	find_extrema(pyramid, &keypoints);
 	 
 	// 7) Calculate image gradient magnitude 'M' and orientations 'R' at each pixel for each smoothed image 
 	//    'A' at each layer of the pyramid. The result are maps with the same dimensions as their corresponding layers,
 	//    referenced in the imagePyramidLayer structs, where each entry corresponds to a matching pixel.
+    printf("- Generating gradient maps...\n");
 	calculate_gradient(pyramid);
 
 	// 8) For each keypoint, accumulate a histogram of local image gradient orientations using a Gaussian-weighted window 
 	//		with 'sigma' of 3 times that of the current smoothing scale
 	//		Each histogram consists of 36 bins covering the 360 degree range of rotations. The peak of the histogram
 	//      is stored for each keypoint as its canonical orientation.
+    printf("- Characterizing keypoints...\n");
 	characterize_keypoint(keypoints, pyramid);
 
 	// 9) Draw keypoint annotations. Annotations are done by multiplying a rotation matrix with coordinates of a template annotation 
 	//      to orient the annotation in the direction of the keypoint orientation. The translated annotation is written over top of
 	//      the original input image
+    printf("- Drawing keypoints...\n");
 	unsigned char* annotatedImage = (unsigned char*)malloc(interpolatedHeight * interpolatedWidth * (int)sizeof(unsigned char));
 	draw_keypoints(keypoints, interpolatedInput, annotatedImage, interpolatedWidth, interpolatedWidth);
 
     *h_outputImage = annotatedImage;
 
-	int countKeypointsLayer1 = 0;
-	int countKeypointsLayer2 = 0;
-	while (keypoints->next != NULL) {
-		printf("Layer: %d, X: %d, Y: %d, Rotation: %d\n", keypoints->layer, keypoints->x, keypoints->y, keypoints->orientation);
-		keypoints = keypoints->next;
-	}
+    printf("- Done.\n");
+
+	//while (keypoints->next != NULL) {
+	//	printf("Layer: %d, X: %d, Y: %d, Rotation: %d\n", keypoints->layer, keypoints->x, keypoints->y, keypoints->orientation);
+	//	keypoints = keypoints->next;
+	//}
 }

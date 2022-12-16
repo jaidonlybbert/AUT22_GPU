@@ -429,10 +429,9 @@ void dev_bilinear_interpolate(unsigned char* inputArray, unsigned char** dev_Exp
     dim3 DimGrid(expandedHeight / BILINEAR_INTERPOLATE_BLOCK_WIDTH + 1, 
         expandedWidth / BILINEAR_INTERPOLATE_BLOCK_WIDTH + 1, 1);
     dim3 DimBlock(BILINEAR_INTERPOLATE_BLOCK_WIDTH, BILINEAR_INTERPOLATE_BLOCK_WIDTH, 1);
-    int tileWidth = ceil(BILINEAR_INTERPOLATE_BLOCK_WIDTH / spacing) + 1;
 
-    bilinear_interpolate_kernel<<<DimGrid, DimBlock, tileWidth * tileWidth * (int)sizeof(unsigned char)>>>(inputArray,
-        *dev_ExpandedImage, spacing, inputWidth, inputHeight, expandedWidth, expandedHeight, tileWidth);
+    bilinear_interpolate_kernel<<<DimGrid, DimBlock>>>(inputArray,
+        *dev_ExpandedImage, spacing, inputWidth, inputHeight, expandedWidth, expandedHeight);
     checkCuda(cudaDeviceSynchronize());
 
     // DEBUG OUTPUT
@@ -444,56 +443,39 @@ void dev_bilinear_interpolate(unsigned char* inputArray, unsigned char** dev_Exp
 
 
 __global__ void bilinear_interpolate_kernel(unsigned char *input, unsigned char *output, float spacing, int inputWidth,
-                                            int inputHeight, int resultWidth, int resultHeight, int inputTileWidth)
+                                            int inputHeight, int resultWidth, int resultHeight)
 {
-    // Dynamically allocate shared memory for image tile
-    extern __shared__ unsigned char imageTile[];
 
     // Calculate row & col relative to output image
     int OutputRow = blockDim.y * blockIdx.y + threadIdx.y;
     int OutputCol = blockDim.x * blockIdx.x + threadIdx.x;
 
-    // Collaboratively load section of input image into shared memory
-    int topLeftX = floor((double)(blockDim.x / spacing * blockIdx.x));
-    int topLeftY = floor((double)(blockDim.y / spacing * blockIdx.y));
-
-    if (threadIdx.x < inputTileWidth && OutputRow < resultHeight && threadIdx.y < inputTileWidth 
-                                                                 && OutputCol < resultWidth) {
-        imageTile[threadIdx.y * inputTileWidth + threadIdx.x] = input[(topLeftY + threadIdx.y) * 
-            inputWidth + topLeftX + threadIdx.x];
-    }
-
-    __syncthreads();
-
     // Coordinates of output pixel relative to the image tile
-    float InputCol = OutputCol / spacing - topLeftX;
-    float InputRow = OutputRow / spacing - topLeftY;
-
-    // Coordinates of surrounding input image pixels relative to image tile
-    float x1 = floor((double)InputCol);
-    float x2 = (ceil((double)InputCol) < inputTileWidth) ? ceil((double)InputCol) : x1;
+    float x = OutputCol / spacing;
+    float y = OutputRow / spacing;
 
     __syncthreads();
 
-    float y1 = floor((double)InputRow);
-    float y2 = (ceil((double)InputRow) < inputTileWidth) ? ceil((double)InputRow) : y1;
+    float x1 = floor(x);
+    float x2 = (ceil(x) < inputWidth) ? ceil(x) : x1;
+    float y1 = floor(y);
+    float y2 = (ceil(y) < inputHeight) ? ceil(y) : y1;
 
     __syncthreads();
 
     // Pixel values of surrounding input image pixels
-    unsigned char Q11, Q21, Q12, Q22;
     float R1, R2;
     if (OutputRow < resultHeight && OutputCol < resultWidth) {
-        unsigned char Q11 = imageTile[(int)y1 * inputTileWidth + (int)x1];
-        unsigned char Q21 = imageTile[(int)y1 * inputTileWidth + (int)x2];
-        unsigned char Q12 = imageTile[(int)y2 * inputTileWidth + (int)x1];
-        unsigned char Q22 = imageTile[(int)y2 * inputTileWidth + (int)x2];
+        unsigned char Q11 = input[(int)y1 * inputWidth + (int)x1];
+        unsigned char Q21 = input[(int)y1 * inputWidth + (int)x2];
+        unsigned char Q12 = input[(int)y2 * inputWidth + (int)x1];
+        unsigned char Q22 = input[(int)y2 * inputWidth + (int)x2];
 
         // Row-wise interpolated values
         // Skip row-wise interpolation if the coordinate lands on a column instead of between columns
-        if (InputCol != x1 && x1 != x2) {
-            R1 = Q11 * (x2 - InputCol) / (x2 - x1) + Q21 * (InputCol - x1) / (x2 - x1);
-            R2 = Q12 * (x2 - InputCol) / (x2 - x1) + Q22 * (InputCol - x1) / (x2 - x1);
+        if (x != x1 && x1 != x2) {
+            R1 = Q11 * (x2 - x) / (x2 - x1) + Q21 * (x - x1) / (x2 - x1);
+            R2 = Q12 * (x2 - x) / (x2 - x1) + Q22 * (x - x1) / (x2 - x1);
         }
         else {
             R1 = Q11;
@@ -502,9 +484,9 @@ __global__ void bilinear_interpolate_kernel(unsigned char *input, unsigned char 
 
         // Final interpolated value
         // Skip column-wise interpolation if coordinate lands on a row instead of between rows
-        if (InputRow != y1 && y1 != y2) {
+        if (y != y1 && y1 != y2) {
             output[OutputRow * resultWidth + OutputCol] = 
-                (unsigned char)(R1 * (y2 - InputRow) / (y2 - y1) + R2 * (InputRow - y1) / (y2 - y1));
+                (unsigned char)(R1 * (y2 - y) / (y2 - y1) + R2 * (y - y1) / (y2 - y1));
         }
         else {
             output[OutputRow * resultWidth + OutputCol] = (unsigned char)R1;
@@ -532,8 +514,6 @@ __global__ void gaussian_blur_kernel(unsigned char* input, unsigned char* output
     if (col < width && row < height) {
         float pixFloatVal = 0.0;
         float pixNormalizeFactor = 0.0;
-        int pixVal = 0;
-        int pixels = 0;
 
         // Get the weighted average of the surrounding pixels using the gaussian blur filter
         int curRow = 0;
@@ -543,7 +523,7 @@ __global__ void gaussian_blur_kernel(unsigned char* input, unsigned char* output
                 curRow = row + blurRow;
                 curCol = col + blurCol;
                 // Verify we have a valid image pixel
-                if (curRow > -1 && curRow < height && curCol > -1 && curCol < width) {
+                if (curRow >= 0 && curRow < height && curCol >= 0 && curCol < width) {
                     pixFloatVal += (float)(input[curRow * width + curCol] * s_blurFilt[(blurRow + filtPadding) * 
                                                                                 kernelDim + blurCol + filtPadding]);
                     // Accumulate a factor to normalize by

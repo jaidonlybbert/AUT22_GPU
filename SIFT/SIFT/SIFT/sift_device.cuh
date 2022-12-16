@@ -9,7 +9,7 @@ void dev_generate_key_masks(imagePyramidLayer pyramid[LAYERS],
     unsigned char* dev_OutputImage, int outputWidth, int outputHeight);
 void dev_sift(unsigned char* dev_rawImage, unsigned char** dev_outputImage, int imgSize, int imgWidth, int imgHeight,
     int* outputWidth, int* outputHeight);
-__global__ void bilinear_interpolate_kernel(unsigned char* input, unsigned char* output, float spacing, int inputWidth, int inputHeight, int resultWidth, int resultHeight, int inputTileWidth);
+__global__ void bilinear_interpolate_kernel(unsigned char* input, unsigned char* output, float spacing, int inputWidth, int inputHeight, int resultWidth, int resultHeight);
 __global__ void gaussian_blur_kernel(unsigned char* input, unsigned char* output, float* gaussianKernel, int height, int width, int kernelDim);
 __global__ void matrix_subtract_kernel(unsigned char* A, unsigned char* B, unsigned char* C, int height, int width);
 __global__ void gradient_map_kernel(unsigned char* input, float* magnitudeMap, int* orientationMap, int height, int width);
