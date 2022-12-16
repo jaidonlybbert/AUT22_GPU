@@ -44,7 +44,7 @@
 #include <windows.h>
 #include <profileapi.h>
 
-int host_main() {
+int host_main_debug() {
 	LARGE_INTEGER counterA, counterB, elapsed_us;
 	LARGE_INTEGER frequency;
 	QueryPerformanceFrequency(&frequency);

@@ -1,0 +1,20 @@
+# Compiler
+CC = nvcc
+
+# Compiler flags
+CFLAGS = -g -Wall -arch=sm_86 -rdc=true -lcudadevrt -lineinfo
+
+TARGET = sift_device
+
+all: $(TARGET)
+
+$(TARGET): $(TARGET).o sift_host.o
+	$(CC) $(CFLAGS) -o $(TARGET) $(TARGET).o sift_host.o
+
+$(TARGET).o: $(TARGET).cu $(TARGET).cuh sift_host.h
+	$(CC) $(CFLAGS) -c $(TARGET).cu
+
+sift_host.o: sift_host.h
+
+clean:
+	$(RM) $(TARGET)

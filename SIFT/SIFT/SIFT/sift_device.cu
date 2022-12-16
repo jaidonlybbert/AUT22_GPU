@@ -33,10 +33,7 @@
 // CUDA
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
-//#ifndef __CUDACC__  
-//#define __CUDACC__
-//#endif
-//#include <device_functions.h>
+#include <nvtx3/nvToolsExt.h>
 
 #include <stdio.h>
 
@@ -60,26 +57,62 @@
 #define MAP_BLOCK_WIDTH 32
 #define HISTOGRAM_KERNEL_WIDTH 5
 
-int main()
-{
-    cudaError_t cudaStatus;
+__device__ __constant__ unsigned char dev_KeypointGraphic[17 * 17];
 
+int main() {
+    nvtxMark("Program start!\n");
     // 0) Load input image into an array -> 'inputArray'
     // read input image from file
     const char filename[] = "../util/test_image.png";
     int x_cols = 0;
     int y_rows = 0;
     int n_pixdepth = 0;
+
+    nvtxMark("Load image from disk.\n");
     unsigned char* h_rawImage = stbi_load(filename, &x_cols, &y_rows, &n_pixdepth, 1);
     int imgSize = x_cols * y_rows * (int)sizeof(unsigned char);
     int imgWidth = x_cols;
     int imgHeight = y_rows;
 
     // Copy image to device
+    nvtxMark("Copy image to device.\n");
     unsigned char* dev_rawImage = 0;
-    unsigned char* dev_InputImage = 0;
+    unsigned char* dev_outputImage = 0;
+    int outputWidth = 0;
+    int outputHeight = 0;
+
     checkCuda(cudaMalloc((void**)&dev_rawImage, imgSize));
     checkCuda(cudaMemcpy(dev_rawImage, h_rawImage, imgSize, cudaMemcpyHostToDevice));
+
+    // Execute CUDA implementation of SIFT
+    nvtxRangePush("CUDA SIFT");
+    dev_sift(dev_rawImage, &dev_outputImage, imgSize, imgWidth, imgHeight, &outputWidth, &outputHeight);
+    nvtxRangePop();
+
+    // Execute CPU implementation of SIFT
+    nvtxRangePush("Host SIFT");
+    
+    nvtxRangePop();
+
+    // DEBUG OUTPUT IMAGE
+    nvtxMark("Allocate host memory for output");
+    unsigned char* h_debug_img = (unsigned char*)malloc(outputWidth * outputHeight * (int)sizeof(unsigned char));
+    const char AnnotatedDir[21] = "../Layers/Output.png";
+    nvtxMark("Copy output from device");
+    checkCuda(cudaMemcpy(h_debug_img, dev_outputImage, outputWidth * outputHeight * (int)sizeof(unsigned char),
+        cudaMemcpyDeviceToHost));
+    nvtxMark("Write output to disk");
+    stbi_write_png(AnnotatedDir, outputWidth, outputHeight, 1, h_debug_img, outputWidth * 1);
+    free(h_debug_img);
+    nvtxMark("Done.");
+}
+
+void dev_sift(unsigned char* dev_rawImage, unsigned char** dev_outputImage, int imgSize, int imgWidth, int imgHeight,
+              int *outputWidth, int *outputHeight)
+{
+    cudaError_t cudaStatus;
+    unsigned char* dev_PyramidInput = 0;
+    unsigned char* dev_LayerInput = 0;
 
     // 1) Expand the raw image via bilinear interpolation -> 'dev_InputImage'
     //      This expanded image is the 'input' top layer of the image pyramid
@@ -90,21 +123,40 @@ int main()
     int resultHeight = 0;
 
     // Call parallel bilinear interpolate on device
-    dev_bilinear_interpolate(dev_rawImage, &dev_InputImage, imgWidth, imgHeight, 2.0, &resultWidth, &resultHeight);
+    nvtxMark("Bilinear interpolate kernel start.");
+    dev_bilinear_interpolate(dev_rawImage, &dev_PyramidInput, imgWidth, imgHeight, 2.0, &resultWidth, &resultHeight);
+    nvtxMark("Copy bilinear interpolate result.");
+    nvtxMark("Allocate");
+    checkCuda(cudaMalloc(&dev_LayerInput, resultWidth * resultHeight * (int)sizeof(unsigned char)));
+    nvtxMark("Cuda copy");
+    checkCuda(cudaMemcpy(dev_LayerInput, dev_PyramidInput, resultWidth * resultHeight * (int)sizeof(unsigned char), 
+                         cudaMemcpyDeviceToDevice));
+    nvtxMark("Cuda free");
     checkCuda(cudaFree(dev_rawImage));
+
+    int pyramidInputWidth = resultWidth;
+    int pyramidInputHeight = resultHeight;
+    *outputWidth = resultWidth;
+    *outputHeight = resultHeight;
+    *dev_outputImage = dev_PyramidInput;
 
     // Create the array of pyramid layers
     imagePyramidLayer pyramid[LAYERS];
-    // This template is used to iteratively export layers as images, by replacing the placeholder 'X' with the layer index
+    // This template is used to iteratively export layers as images, by replacing the placeholder 'X' 
+    // with the layer index
     const char directoryTemplate[] = "../Layers/AX.png";
 
     // Pointer to host-side output image for debugging
     unsigned char* h_debug_img = NULL;
+    int* h_debug_orientations = NULL;
 
-    // For each layer in pyramid, construct two images with increasing levels of blur, and compute the difference of gaussian (DoG)
-    // Apply bilinear interpolation to the second of the two blurred images, and use that in the next iteration as the input image
-    // Keep these images in DEVICE memory, and reference them via the pointers in the 'imagePyramidLayer' structs
+    // For each layer in pyramid, construct two images with increasing levels of blur, and compute the difference of 
+    // gaussian (DoG)
+    // Apply bilinear interpolation to the second of the two blurred images, and use that in the next iteration as the 
+    // input image
+    // Keep these images in device memory, and reference them via the pointers in the 'imagePyramidLayer' structs
     for (int i = 0; i < LAYERS; i++) {
+        nvtxMark("Start building next pyramid layer");
         // Copy directory name to layer
         for (int j = 0; j < 17; j++) {
             pyramid[i].layerOutputDir[j] = directoryTemplate[j];
@@ -115,12 +167,13 @@ int main()
         pyramid[i].width = resultWidth;
 
         // Allocate memory for blurred image A, B and DoG on device
+        nvtxMark("Allocate memory for layer on device.");
         checkCuda(cudaMalloc(&pyramid[i].imageA, resultWidth * resultHeight * (int)sizeof(unsigned char)));
         checkCuda(cudaMalloc(&pyramid[i].imageB, resultWidth * resultHeight * (int)sizeof(unsigned char)));
         checkCuda(cudaMalloc(&pyramid[i].DoG, resultWidth * resultHeight * (int)sizeof(unsigned char)));
         checkCuda(cudaMalloc(&pyramid[i].gradientMagnitudeMap, resultWidth * resultHeight * (int)sizeof(float)));
         checkCuda(cudaMalloc(&pyramid[i].gradientOrientationMap, resultWidth * resultHeight * (int)sizeof(int)));
-  
+        // Allocate memory for keymasks for inner layers
         if (i > 0 && i < LAYERS - 1) {
             checkCuda(cudaMalloc(&pyramid[i].keyMask, resultWidth * resultHeight * (int)sizeof(int)));
         }
@@ -130,68 +183,114 @@ int main()
         float sigma = sqrt(2);
         int kernelWidth = 9;
         // Call device kernel for guassian blur
-        dev_gaussian_blur(dev_InputImage, pyramid[i].imageA, resultWidth, resultHeight, sigma, kernelWidth);
+        nvtxMark("Gaussian blur A");
+        dev_gaussian_blur(dev_LayerInput, pyramid[i].imageA, resultWidth, resultHeight, sigma, kernelWidth);
         // DEBUG OUTPUT IMAGE
-        h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
-        checkCuda(cudaMemcpy(h_debug_img, pyramid[i].imageA, resultWidth * resultHeight * (int)sizeof(unsigned char), cudaMemcpyDeviceToHost));
-        stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
-        free(h_debug_img);
+        //h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
+        //checkCuda(cudaMemcpy(h_debug_img, pyramid[i].imageA, resultWidth * resultHeight * (int)sizeof(unsigned char), 
+        //                     cudaMemcpyDeviceToHost));
+        //stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
+        //free(h_debug_img);
 
         // 3) Apply gaussian blur to the image A -> 'B'
+        nvtxMark("Gaussian blur B");
         dev_gaussian_blur(pyramid[i].imageA, pyramid[i].imageB, resultWidth, resultHeight, sigma, kernelWidth);
         // DEBUG OUTPUT IMAGE
-        h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
-        pyramid[i].layerOutputDir[10] = (char)'B';
-        checkCuda(cudaMemcpy(h_debug_img, pyramid[i].imageB, resultWidth * resultHeight * (int)sizeof(unsigned char), cudaMemcpyDeviceToHost));
-        stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
-        free(h_debug_img);
+        //h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
+        //pyramid[i].layerOutputDir[10] = (char)'B';
+        //checkCuda(cudaMemcpy(h_debug_img, pyramid[i].imageB, resultWidth * resultHeight * (int)sizeof(unsigned char), 
+        //                     cudaMemcpyDeviceToHost));
+        //stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
+        //free(h_debug_img);
 
         // 4) Subtract 'A' - 'B' -> 'DoG'
+        nvtxMark("Matrix subtract");
         dev_matrix_subtract(pyramid[i].imageA, pyramid[i].imageB, pyramid[i].DoG, resultWidth, resultHeight);
         // DEBUG OUTPUT IMAGE
-        h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
-        pyramid[i].layerOutputDir[10] = (char)'C';
-        checkCuda(cudaMemcpy(h_debug_img, pyramid[i].DoG, resultWidth * resultHeight * (int)sizeof(unsigned char), cudaMemcpyDeviceToHost));
-        stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
-        free(h_debug_img);
+        //h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
+        //pyramid[i].layerOutputDir[10] = (char)'C';
+        //checkCuda(cudaMemcpy(h_debug_img, pyramid[i].DoG, resultWidth * resultHeight * (int)sizeof(unsigned char), 
+        //                     cudaMemcpyDeviceToHost));
+        //stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
+        //free(h_debug_img);
 
         // 5) Compute gradient maps
-        dev_calculate_gradient_maps(pyramid[i].imageA, pyramid[i].gradientMagnitudeMap, pyramid[i].gradientOrientationMap, resultWidth, resultHeight);
+        nvtxMark("Generate gradient maps");
+        dev_calculate_gradient_maps(pyramid[i].imageA, pyramid[i].gradientMagnitudeMap, 
+                                    pyramid[i].gradientOrientationMap, resultWidth, resultHeight);
+        //------DEBUG CHECK VALID ORIENTATIONS-----
+        //h_debug_orientations = (int*)malloc(resultWidth * resultHeight * (int)sizeof(int));
+        //checkCuda(cudaMemcpy(h_debug_orientations, pyramid[i].gradientOrientationMap, resultWidth * resultHeight * 
+        // (int)sizeof(int), cudaMemcpyDeviceToHost));
+        //int countInvalidOrientations = 0;
+        //for (int k = 0; k < resultHeight; k++) {
+        //    for (int r = 0; r < resultWidth; r++) {
+        //        int tmp = h_debug_orientations[k * resultWidth + r];
+        //        if (tmp < 0 || tmp > 360) {
+        //            printf("Orientation: %d Row: %d Col: %d\n", tmp, k, r);
+        //        }
+        //    }
+        //}
+        //free(h_debug_orientations);
 
         // 6) Apply bilinear interpolation to 'B' -> Image input for next layer
         //    Skip for last iteration
-        checkCuda(cudaFree(dev_InputImage));
+        nvtxMark("Free layer input");
+        checkCuda(cudaFree(dev_LayerInput));
         if (i < LAYERS - 1) {
-            dev_bilinear_interpolate(pyramid[i].imageB, &dev_InputImage, resultWidth, resultHeight, BILINEAR_INTERPOLATION_SPACING, &resultWidth, &resultHeight);
+            nvtxMark("Bilinear interpolate for input to next layer");
+            dev_bilinear_interpolate(pyramid[i].imageB, &dev_LayerInput, resultWidth, resultHeight, 
+                                     BILINEAR_INTERPOLATION_SPACING, &resultWidth, &resultHeight);
         }
     }
 
-    // 7) Collect local maxima and minima coordinates in scale space, and mark them in the 'keyMask' of each layer
-    dev_generate_key_masks(pyramid);
+    //printf("Pyramid generated successfully.\n");
 
-    return 0;
-}
-
-void dev_generate_key_orientation_map(imagePyramidLayer pyramid[LAYERS]) {
-    // For each keypoint, accumulate a histogram of local image gradient orientations using a Gaussian - weighted window
-    //		with 'sigma' of 3 times that of the current smoothing scale
-    //		Each histogram consists of 36 bins covering the 360 degree range of rotations. The peak of the histogram
-    //      is stored for each keypoint as its canonical orientation.
-
-    for (int i = 1; i < LAYERS - 1; i++) {
-
+    nvtxMark("Creating keypoint template");
+    // Draw keypoint graphic template. This will be copied and rotated to match each keypoint orientation.
+    unsigned char keypointGraphic[17][17] = {0};
+    for (int i = 0; i < 17; i++) {
+        // Top line
+        keypointGraphic[0][i] = 255;
+        // Bottom line
+        keypointGraphic[16][i] = 255;
+        // Left line
+        keypointGraphic[i][0] = 255;
+        // Right line
+        keypointGraphic[i][16] = 255;
+        // Center line segment
+        if (i > 8) {
+            keypointGraphic[8][i] = 255;
+        }
     }
+    
+    nvtxMark("Copy template to device");
+    checkCuda(cudaMemcpyToSymbol(dev_KeypointGraphic, keypointGraphic, 17 * 17 * (int)sizeof(unsigned char)));
 
+    // 7) Collect local maxima and minima coordinates in scale space, and mark them in the 'keyMask' of each layer
+    //    Use CUDA dynamic parallelism to draw keypoints on the output image
+    nvtxMark("Find keypoints and draw them on output image.");
+    dev_generate_key_masks(pyramid, dev_KeypointGraphic, dev_PyramidInput, pyramidInputWidth, pyramidInputHeight);
+
+    //printf("Keys generated, and written to output image.");
 }
 
-void dev_generate_key_masks(imagePyramidLayer pyramid[LAYERS]) {
+void dev_generate_key_masks(imagePyramidLayer pyramid[LAYERS], unsigned char keypointGraphic[289], 
+                            unsigned char* dev_OutputImage, int outputWidth, int outputHeight) {
     /*
-    * Searches pyramid structure for local extrema or 'keypoints'. Each pixel is evaluated against its nearest neighbors in scale space.
+    * Searches pyramid structure for local extrema or 'keypoints'. Each pixel is evaluated against its nearest 
+    * neighbors in scale space.
     *
     * The key mask is initialized as all zeroes and matches the dimensions of the image layer.
     * Locations of keypoints in each layer are marked with a value of 255 in the keypoint mask.
     */
+    imagePyramidLayer* dev_Pyramid = NULL;
+
+    checkCuda(cudaMalloc(&dev_Pyramid, LAYERS * (int)sizeof(imagePyramidLayer)));
+    checkCuda(cudaMemcpy(dev_Pyramid, pyramid, LAYERS * (int)sizeof(imagePyramidLayer), cudaMemcpyHostToDevice));
+
     for (int i = 1; i < LAYERS - 1; i++) {
+        //printf("\nGenerating key masks for layer %d\n", i);
         // Generate gaussian weight kernel for layer, used in histogram to determine keypoint orientation
         // A gaussian kernel is used for the weighted histogram
         // The 'sigma' parameter is based on the layers level of blur
@@ -204,28 +303,42 @@ void dev_generate_key_masks(imagePyramidLayer pyramid[LAYERS]) {
         get_gaussian_kernel(&gaussian_kernel, sigma, kernelWidth);
         // Move kernel to device
         checkCuda(cudaMalloc(&dev_gaussian_kernel, kernelWidth * kernelWidth * (int)sizeof(float)));
-        checkCuda(cudaMemcpy(dev_gaussian_kernel, gaussian_kernel, kernelWidth * kernelWidth * (int)(sizeof(float)), cudaMemcpyHostToDevice));
+        checkCuda(cudaMemcpy(dev_gaussian_kernel, gaussian_kernel, kernelWidth * kernelWidth * (int)(sizeof(float)), 
+            cudaMemcpyHostToDevice));
+        //printf("- Histogram kernel generated and moved to device.\n");
 
         dim3 DimGrid(pyramid[i].height / MAP_BLOCK_WIDTH + 1, pyramid[i].width / MAP_BLOCK_WIDTH + 1, 1);
         dim3 DimBlock(MAP_BLOCK_WIDTH, MAP_BLOCK_WIDTH, 1);
-        generate_key_mask_kernel<<<DimGrid, DimBlock>>>(pyramid[i].DoG, pyramid[i + 1].DoG, pyramid[i - 1].DoG, pyramid[i].gradientOrientationMap, pyramid[i].keyMask, dev_gaussian_kernel, pyramid[i].width, pyramid[i].height);
+        generate_key_mask_kernel<<<DimGrid, DimBlock>>>(dev_Pyramid, dev_gaussian_kernel, i, dev_OutputImage,
+                                                        outputWidth, outputHeight);
         checkCuda(cudaDeviceSynchronize());
+        //printf("- Key mask generated.\n");
 
         //-----------DEBUG OUTPUT------------
-        int* h_keymask = (int*)malloc(pyramid[i].width * pyramid[i].height * sizeof(int));
-        checkCuda(cudaMemcpy(h_keymask, pyramid[i].keyMask, pyramid[i].height * pyramid[i].width * (int)sizeof(int), cudaMemcpyDeviceToHost));
-        int keypointCount = 0;
-        for (int i = 0; i < pyramid[i].height * pyramid[i].width; i++) {
-            if (h_keymask[i] != -1) {
-                keypointCount++;
-            }
-        }
-        free(h_keymask);
-        printf("Layer %d keypoints: %d\n", i, keypointCount);
+        //int* h_keymask = (int*)malloc(pyramid[i].width * pyramid[i].height * sizeof(int));
+        //checkCuda(cudaMemcpy(h_keymask, pyramid[i].keyMask, pyramid[i].height * pyramid[i].width * (int)sizeof(int), 
+        //                     cudaMemcpyDeviceToHost));
+        //int keypointCount = 0;
+        //for (int j = 0; j < pyramid[i].height * pyramid[i].width; j++) {
+        //    if (h_keymask[j] != -1) {
+        //        keypointCount++;
+        //    }
+        //}
+        //free(h_keymask);
+        //printf("Layer %d keypoints: %d\n", i, keypointCount);
     }
 }
 
-__global__ void generate_key_mask_kernel(unsigned char* dev_DoG, unsigned char* dev_DoG_below, unsigned char* dev_DoG_above, int* dev_orientation_map, int* dev_keymask, float* dev_gaussian_kernel, int width, int height) {
+__global__ void generate_key_mask_kernel(imagePyramidLayer pyramid[LAYERS], float* dev_gaussian_kernel, int layer,
+                                         unsigned char* dev_OutputImage, int outputWidth, int outputHeight) {
+
+    unsigned char* dev_DoG = pyramid[layer].DoG;
+    unsigned char* dev_DoG_below = pyramid[layer + 1].DoG;
+    unsigned char* dev_DoG_above = pyramid[layer - 1].DoG;
+    int* dev_orientation_map = pyramid[layer].gradientOrientationMap;
+    int* dev_keymask = pyramid[layer].keyMask;
+    int width = pyramid[layer].width;
+    int height = pyramid[layer].height;
 
     int row = blockDim.y * blockIdx.y + threadIdx.y;
     int col = blockDim.x * blockIdx.x + threadIdx.x;
@@ -237,9 +350,16 @@ __global__ void generate_key_mask_kernel(unsigned char* dev_DoG, unsigned char* 
     unsigned char neighborPixVal = 0;
     unsigned char pixVal = dev_DoG[idx];
 
-    // Exclude edges
-    if (row > 0 && row < height - 1 && col > 0 && col < height - 1) {
-        // Check pixel value against neighboring pixel values in the same layer
+    bool notOnEdge = (row > 0 && row < height - 1 && col > 0 && col < height - 1);
+
+    //------DEBUG OUTPUT--
+    //if (row == 0 && col == 0) {
+    //    printf("- Comparing against neighbor pixels.\n");
+    //}
+
+    // Check pixel value against neighboring pixel values in the same layer
+    // To determine if it is an extrema
+    if (notOnEdge) {
         for (int x = -1; x <= 1; x++) {
             for (int y = -1; y <= 1; y++) {
                 neighborPixVal = dev_DoG[(row + y) * width + (col + x)];
@@ -254,60 +374,86 @@ __global__ void generate_key_mask_kernel(unsigned char* dev_DoG, unsigned char* 
                 }
             }
         }
+    }
 
-        // If the pixel value is an extrema of the current layer, check against pixels in layer below
-        if (pixVal < minVal || pixVal > maxVal) {
+    __syncthreads();
 
-            int xcoordBelow = col * BILINEAR_INTERPOLATION_SPACING;
-            int ycoordBelow = row * BILINEAR_INTERPOLATION_SPACING;
-            int widthBelow = ceil((double)width * BILINEAR_INTERPOLATION_SPACING);
-            int heightBelow = ceil((double)height * BILINEAR_INTERPOLATION_SPACING);
+    // If the pixel value is an extrema of the current layer, check against pixels in layer below
+    if (notOnEdge && (pixVal < minVal || pixVal > maxVal)) {
 
-            for (int r = -1; r <= 1; r++) {
-                for (int s = -1; s <= 1; s++) {
-                    if (ycoordBelow + r > 0 && ycoordBelow + r < heightBelow && xcoordBelow + s > 0 && xcoordBelow + s < widthBelow) {
-                        neighborPixVal = dev_DoG_below[(ycoordBelow + r) * widthBelow + (xcoordBelow + s)];
-                    }
+        int xcoordBelow = col * BILINEAR_INTERPOLATION_SPACING;
+        int ycoordBelow = row * BILINEAR_INTERPOLATION_SPACING;
+        int widthBelow = ceil((double)width * BILINEAR_INTERPOLATION_SPACING);
+        int heightBelow = ceil((double)height * BILINEAR_INTERPOLATION_SPACING);
 
-                    if (neighborPixVal < minVal) {
-                        minVal = neighborPixVal;
-                    }
-                    else if (neighborPixVal > maxVal) {
-                        maxVal = neighborPixVal;
-                    }
+        for (int r = -1; r <= 1; r++) {
+            for (int s = -1; s <= 1; s++) {
+                if (ycoordBelow + r > 0 && ycoordBelow + r < heightBelow && xcoordBelow + s > 0 && 
+                        xcoordBelow + s < widthBelow) {
+                    neighborPixVal = dev_DoG_below[(ycoordBelow + r) * widthBelow + (xcoordBelow + s)];
+                }
+
+                if (neighborPixVal < minVal) {
+                    minVal = neighborPixVal;
+                }
+                else if (neighborPixVal > maxVal) {
+                    maxVal = neighborPixVal;
                 }
             }
         }
+    }
 
-        // If the pixel value is still an extrema, check against pixels in layer above
-        if (pixVal < minVal || pixVal > maxVal) {
-            int xcoordAbove = col / BILINEAR_INTERPOLATION_SPACING;
-            int ycoordAbove = row / BILINEAR_INTERPOLATION_SPACING;
-            int widthAbove = floor((double)width / BILINEAR_INTERPOLATION_SPACING);
-            int heightAbove = floor((double)height / BILINEAR_INTERPOLATION_SPACING);
+    __syncthreads();
 
-            for (int r = -1; r <= 1; r++) {
-                for (int s = -1; s <= 1; s++) {
-                    if (ycoordAbove + r > 0 && ycoordAbove + r < heightAbove && xcoordAbove + s > 0 && xcoordAbove + s < widthAbove) {
-                        neighborPixVal = dev_DoG_above[(ycoordAbove + r) * widthAbove + (xcoordAbove + s)];
-                    }
+    // If the pixel value is still an extrema, check against pixels in layer above
+    if (notOnEdge && (pixVal < minVal || pixVal > maxVal)) {
+        int xcoordAbove = col / BILINEAR_INTERPOLATION_SPACING;
+        int ycoordAbove = row / BILINEAR_INTERPOLATION_SPACING;
+        int widthAbove = floor((double)width / BILINEAR_INTERPOLATION_SPACING);
+        int heightAbove = floor((double)height / BILINEAR_INTERPOLATION_SPACING);
 
-                    if (neighborPixVal < minVal) {
-                        minVal = neighborPixVal;
-                    }
-                    else if (neighborPixVal > maxVal) {
-                        maxVal = neighborPixVal;
-                    }
+        for (int r = -1; r <= 1; r++) {
+            for (int s = -1; s <= 1; s++) {
+                if (ycoordAbove + r > 0 && ycoordAbove + r < heightAbove && xcoordAbove + s > 0 && 
+                                                                            xcoordAbove + s < widthAbove) {
+                    neighborPixVal = dev_DoG_above[(ycoordAbove + r) * widthAbove + (xcoordAbove + s)];
+                }
+
+                if (neighborPixVal < minVal) {
+                    minVal = neighborPixVal;
+                }
+                else if (neighborPixVal > maxVal) {
+                    maxVal = neighborPixVal;
                 }
             }
         }
+    }
 
-        // If the pixel is still an extrema, it is a keypoint.
-        // Call child kernel to determine orientation of keypoint.
+    //---------DEBUG OUTPUT----
+    //if (row == 0 && col == 0) {
+    //    for (int m = 0; m < 17 * 17; m++) {
+    //        unsigned char val = dev_KeypointGraphic[m];
+    //        printf("Pixval: %d\n", (int)val);
+    //    }
+    //}
+
+    __syncthreads();
+
+
+    // If the pixel is still an extrema, it is a keypoint.
+    // Call child kernel to determine orientation of keypoint.
+    if (notOnEdge) {
         if (pixVal < minVal || pixVal > maxVal) {
             dim3 GridDim(1, 1, 1);
             dim3 BlockDim(HISTOGRAM_KERNEL_WIDTH, HISTOGRAM_KERNEL_WIDTH, 1);
-            orientation_histogram_kernel<<<GridDim, BlockDim>>>(dev_keymask, dev_orientation_map, dev_gaussian_kernel, width, height, col, row);
+            orientation_histogram_kernel<<<GridDim, BlockDim>>>(dev_keymask, dev_orientation_map, dev_gaussian_kernel, 
+                width, height, col, row, idx);
+            cudaDeviceSynchronize();
+            dim3 BlockDimDraw(17, 17, 1);
+            if (layer == 1) {
+                draw_keypoint_kernel << <GridDim, BlockDimDraw>> > (dev_KeypointGraphic, 
+                    dev_OutputImage, dev_keymask, idx, row, col, layer, outputWidth, outputHeight);
+            }
         }
         else {
             dev_keymask[idx] = -1; // Negative indicates no keypoint
@@ -315,7 +461,72 @@ __global__ void generate_key_mask_kernel(unsigned char* dev_DoG, unsigned char* 
     }
 }
 
-__global__ void orientation_histogram_kernel(int* keyMask, int* orientationMap, float* gaussianKernel, int width, int height, int x, int y) {
+__global__ void draw_keypoint_kernel(unsigned char* dev_keypoint_template, unsigned char* dev_OutputImage, 
+     int* dev_keymask, int idx, int row, int col, int layer, int outputWidth, int outputHeight) {
+    // Orients and draws keypoint on output image
+
+    // Scale row and column down to match base layer
+    row = row * pow((double)BILINEAR_INTERPOLATION_SPACING, -layer);
+    col = col * pow((double)BILINEAR_INTERPOLATION_SPACING, -layer);
+
+    // Pixel value
+    int orientation = dev_keymask[idx];
+    unsigned char pixVal = dev_keypoint_template[threadIdx.y * 17 + threadIdx.x];
+    
+    // Coordinates of thread centered at zero for rotation
+    float x_in = threadIdx.x - blockDim.x / 2.0;
+    float y_in = threadIdx.y - blockDim.y / 2.0;
+
+    // Transform matrix
+    __shared__ double rotationMatrix[2][2];
+
+    // Convert orientation to radians
+    double orientationRad = (double)(orientation) * (double)PI / 180;
+
+    // Compute rotation matrix coefficients collaboratively
+    if (threadIdx.x == 0) {
+        if (threadIdx.y == 0) {
+            rotationMatrix[0][0] = cos(orientationRad);
+        }
+        else if (threadIdx.y == 1) {
+            rotationMatrix[0][1] = -sin(orientationRad);
+        }
+        else if (threadIdx.y == 2) {
+            rotationMatrix[1][0] = sin(orientationRad);
+        }
+        else if (threadIdx.y == 3) {
+            rotationMatrix[1][1] = cos(orientationRad);
+        }
+    }
+    
+    __syncthreads();
+
+    // Output coordinates
+    float x_out = (rotationMatrix[0][0] * x_in + rotationMatrix[0][1] * y_in);
+    float y_out = (rotationMatrix[1][0] * x_in + rotationMatrix[1][1] * y_in);
+
+    // roatated coordinates of thread (pixel) relative to output image grid
+    int outputRow = (int)(row + y_out - (blockDim.y / 2.0));
+    int outputCol = (int)(col + x_out - (blockDim.x / 2.0));
+
+    //-------DEBUG OUTPUT----------
+    //if (threadIdx.x == 0 && threadIdx.y == 0) {
+    //    printf("X: %d, Y: %d, Radians: %d\n", col, row, orientation);
+    //}
+
+    // Write to output image
+    if (pixVal == 255 && outputRow < outputHeight && outputRow > 0 && outputCol < outputWidth && outputCol > 0) {
+        dev_OutputImage[outputRow * outputWidth + outputCol] = pixVal;
+    }
+}
+
+__global__ void orientation_histogram_kernel(int* keyMask, int* orientationMap, float* gaussianKernel, int width, 
+    int height, int x, int y, int idx) {
+    // For each keypoint, accumulate a histogram of local image gradient orientations using a Gaussian-weighted window
+    //		with 'sigma' of 3 times that of the current smoothing scale
+    //		Each histogram consists of 36 bins covering the 360 degree range of rotations. The peak of the histogram
+    //      is stored for each keypoint as its canonical orientation.
+
     // Create histogram shared between threads
     __shared__ float orientation_histogram[36];
 
@@ -323,16 +534,16 @@ __global__ void orientation_histogram_kernel(int* keyMask, int* orientationMap, 
     int kernelRadius = floor((double)blockDim.x / 2.0);
 
     // Coordinates of thread relative to the orientation map dimensions
-    int row = blockDim.y * blockIdx.y + threadIdx.y + y - kernelRadius;
-    int col = blockDim.x * blockIdx.x + threadIdx.x + y - kernelRadius;
+    int row = threadIdx.y + y - kernelRadius;
+    int col = threadIdx.x + x - kernelRadius;
     int map_idx = row * width + col;
     int gaussianKernelIdx = threadIdx.y * blockDim.x + threadIdx.x;
     float weight = gaussianKernel[gaussianKernelIdx];
 
     if (row < height && row > 0 && col > 0 && col < width) {
-        float orientation = orientationMap[map_idx];
+        float orientation = orientationMap[map_idx]; 
         int bin = floor(orientation / 10);
-        orientation_histogram[bin] += weight;
+        atomicAdd((orientation_histogram+bin), weight);
     }
 
     __syncthreads();
@@ -349,11 +560,13 @@ __global__ void orientation_histogram_kernel(int* keyMask, int* orientationMap, 
             }
         }
 
-        keyMask[map_idx] = maxBin * 10;
+        keyMask[idx] = maxBin * 10; // Orientation in degrees with resolution of 10 degrees
+        /*printf("Orientation: %d\n", maxBin * 10);*/
     }
 }
 
-void dev_calculate_gradient_maps(unsigned char* baseImage, float* gradientMagnitudeMap, int* gradientOrientationMap, int width, int height) {
+void dev_calculate_gradient_maps(unsigned char* baseImage, float* gradientMagnitudeMap, int* gradientOrientationMap, 
+    int width, int height) {
     /*
     * Calculates gradient magnitude and gradient orientation maps for each layer of the pyramid on device.
     *
@@ -366,7 +579,8 @@ void dev_calculate_gradient_maps(unsigned char* baseImage, float* gradientMagnit
     checkCuda(cudaDeviceSynchronize());
 }
 
-void dev_matrix_subtract(unsigned char* dev_imgA, unsigned char* dev_imgB, unsigned char* dev_imgC, int width, int height) {
+void dev_matrix_subtract(unsigned char* dev_imgA, unsigned char* dev_imgB, unsigned char* dev_imgC, int width, 
+    int height) {
     /*
     * Computes matrix subraction 'A' - 'B' = 'C' with CUDA
     */
@@ -377,9 +591,11 @@ void dev_matrix_subtract(unsigned char* dev_imgA, unsigned char* dev_imgB, unsig
     checkCuda(cudaDeviceSynchronize());
 }
 
-void dev_gaussian_blur(unsigned char* img, unsigned char* outputArray, int inputWidth, int inputHeight, float sigma, int kernelWidth) {
+void dev_gaussian_blur(unsigned char* img, unsigned char* outputArray, int inputWidth, int inputHeight, float sigma, 
+    int kernelWidth) {
     /*
-    * Convolves inputArray with a Gaussian kernel defined by g(x) = 1 / (sqrt(2*pi) * sigma) * exp(-(x**2) / (2 * sigma**2))
+    * Convolves inputArray with a Gaussian kernel defined by 
+    * g(x) = 1 / (sqrt(2*pi) * sigma) * exp(-(x**2) / (2 * sigma**2))
     *
     * kernelWidth is assumed to be odd.
     */
@@ -401,18 +617,20 @@ void dev_gaussian_blur(unsigned char* img, unsigned char* outputArray, int input
     dim3 DimGrid(inputHeight / BLUR_BLOCK_WIDTH + 1, inputWidth / BLUR_BLOCK_WIDTH + 1, 1);
     dim3 DimBlock(BLUR_BLOCK_WIDTH, BLUR_BLOCK_WIDTH, 1);
 
-    gaussian_blur_kernel << <DimGrid, DimBlock, kernelWidth* kernelWidth * (int)sizeof(float) >> > (img, outputArray, dev_kernel, inputHeight, inputWidth, kernelWidth);
+    gaussian_blur_kernel << <DimGrid, DimBlock, kernelWidth* kernelWidth * (int)sizeof(float) >> > (img, outputArray, 
+        dev_kernel, inputHeight, inputWidth, kernelWidth);
     checkCuda(cudaDeviceSynchronize());
     
     free(kernel);
 }
 
-void dev_bilinear_interpolate(unsigned char* inputArray, unsigned char** dev_ExpandedImage, int inputWidth, int inputHeight,
-    float spacing, int* resultWidth, int* resultHeight) {
+void dev_bilinear_interpolate(unsigned char* inputArray, unsigned char** dev_ExpandedImage, int inputWidth, 
+    int inputHeight, float spacing, int* resultWidth, int* resultHeight) {
     /*
     * Applies bilinear interpolation to inputArray with spacing 'spacing', and stores result in 'inputArrayExpanded'.
     *
-    * Pixels of the output image are calculated according to the equation: P(x,y) = R1 * (y2-y)/(y2-y1) + R2 * (y-y1)/(y2-y1)
+    * Pixels of the output image are calculated according to the equation: 
+    * P(x,y) = R1 * (y2-y)/(y2-y1) + R2 * (y-y1)/(y2-y1)
     */
     assert(inputArray != NULL);
     assert(dev_ExpandedImage != NULL);
@@ -428,22 +646,25 @@ void dev_bilinear_interpolate(unsigned char* inputArray, unsigned char** dev_Exp
     *resultHeight = expandedHeight;
 
     // Launch device kernel
-    dim3 DimGrid(expandedHeight / BILINEAR_INTERPOLATE_BLOCK_WIDTH + 1, expandedWidth / BILINEAR_INTERPOLATE_BLOCK_WIDTH + 1, 1);
+    dim3 DimGrid(expandedHeight / BILINEAR_INTERPOLATE_BLOCK_WIDTH + 1, 
+        expandedWidth / BILINEAR_INTERPOLATE_BLOCK_WIDTH + 1, 1);
     dim3 DimBlock(BILINEAR_INTERPOLATE_BLOCK_WIDTH, BILINEAR_INTERPOLATE_BLOCK_WIDTH, 1);
     int tileWidth = ceil(BILINEAR_INTERPOLATE_BLOCK_WIDTH / spacing) + 1;
 
-    bilinear_interpolate_kernel<<<DimGrid, DimBlock, tileWidth * tileWidth * (int)sizeof(unsigned char) >> >(inputArray, *dev_ExpandedImage, spacing, inputWidth, inputHeight, expandedWidth, expandedHeight, tileWidth);
+    bilinear_interpolate_kernel<<<DimGrid, DimBlock, tileWidth * tileWidth * (int)sizeof(unsigned char)>>>(inputArray,
+        *dev_ExpandedImage, spacing, inputWidth, inputHeight, expandedWidth, expandedHeight, tileWidth);
     checkCuda(cudaDeviceSynchronize());
 
     // DEBUG OUTPUT
-    unsigned char* expanded = (unsigned char*)malloc(expandedLength * sizeof(unsigned char));
-    checkCuda(cudaMemcpy(expanded, *dev_ExpandedImage, expandedLength, cudaMemcpyDeviceToHost));
-    const char directoryTemplate[] = "../Layers/interpolated.png";
-    stbi_write_png(directoryTemplate, expandedWidth, expandedHeight, 1, expanded, expandedWidth * 1);
+    //unsigned char* expanded = (unsigned char*)malloc(expandedLength * sizeof(unsigned char));
+    //checkCuda(cudaMemcpy(expanded, *dev_ExpandedImage, expandedLength, cudaMemcpyDeviceToHost));
+    //const char directoryTemplate[] = "../Layers/interpolated.png";
+    //stbi_write_png(directoryTemplate, expandedWidth, expandedHeight, 1, expanded, expandedWidth * 1);
 }
 
 
-__global__ void bilinear_interpolate_kernel(unsigned char *input, unsigned char *output, float spacing, int inputWidth, int inputHeight, int resultWidth, int resultHeight, int inputTileWidth)
+__global__ void bilinear_interpolate_kernel(unsigned char *input, unsigned char *output, float spacing, int inputWidth,
+                                            int inputHeight, int resultWidth, int resultHeight, int inputTileWidth)
 {
     // Dynamically allocate shared memory for image tile
     extern __shared__ unsigned char imageTile[];
@@ -456,8 +677,10 @@ __global__ void bilinear_interpolate_kernel(unsigned char *input, unsigned char 
     int topLeftX = floor((double)(blockDim.x / spacing * blockIdx.x));
     int topLeftY = floor((double)(blockDim.y / spacing * blockIdx.y));
 
-    if (threadIdx.x < inputTileWidth && OutputRow < resultHeight && threadIdx.y < inputTileWidth && OutputCol < resultWidth) {
-        imageTile[threadIdx.y * inputTileWidth + threadIdx.x] = input[(topLeftY + threadIdx.y) * inputWidth + topLeftX + threadIdx.x];
+    if (threadIdx.x < inputTileWidth && OutputRow < resultHeight && threadIdx.y < inputTileWidth 
+                                                                 && OutputCol < resultWidth) {
+        imageTile[threadIdx.y * inputTileWidth + threadIdx.x] = input[(topLeftY + threadIdx.y) * 
+            inputWidth + topLeftX + threadIdx.x];
     }
 
     __syncthreads();
@@ -500,7 +723,8 @@ __global__ void bilinear_interpolate_kernel(unsigned char *input, unsigned char 
         // Final interpolated value
         // Skip column-wise interpolation if coordinate lands on a row instead of between rows
         if (InputRow != y1) {
-            output[OutputRow * resultWidth + OutputCol] = (unsigned char)(R1 * (y2 - InputRow) / (y2 - y1) + R2 * (InputRow - y1) / (y2 - y1));
+            output[OutputRow * resultWidth + OutputCol] = 
+                (unsigned char)(R1 * (y2 - InputRow) / (y2 - y1) + R2 * (InputRow - y1) / (y2 - y1));
         }
         else {
             output[OutputRow * resultWidth + OutputCol] = (unsigned char)R1;
@@ -508,7 +732,8 @@ __global__ void bilinear_interpolate_kernel(unsigned char *input, unsigned char 
     }
 }
 
-__global__ void gaussian_blur_kernel(unsigned char* input, unsigned char* output, float* gaussianKernel, int height, int width, int kernelDim) {
+__global__ void gaussian_blur_kernel(unsigned char* input, unsigned char* output, float* gaussianKernel, int height, 
+                                     int width, int kernelDim) {
     // Dynamically allocate memory for blur kernel
     extern __shared__ float s_blurFilt[];
     
@@ -539,8 +764,10 @@ __global__ void gaussian_blur_kernel(unsigned char* input, unsigned char* output
                 curCol = col + blurCol;
                 // Verify we have a valid image pixel
                 if (curRow > -1 && curRow < height && curCol > -1 && curCol < width) {
-                    pixFloatVal += (float)(input[curRow * width + curCol] * s_blurFilt[(blurRow + filtPadding) * kernelDim + blurCol + filtPadding]);
-                    pixNormalizeFactor += s_blurFilt[(blurRow + filtPadding) * kernelDim + blurCol + filtPadding]; // Accumulate a factor to normalize by
+                    pixFloatVal += (float)(input[curRow * width + curCol] * s_blurFilt[(blurRow + filtPadding) * 
+                                                                                kernelDim + blurCol + filtPadding]);
+                    // Accumulate a factor to normalize by
+                    pixNormalizeFactor += s_blurFilt[(blurRow + filtPadding) * kernelDim + blurCol + filtPadding]; 
                 }
             }
         }
@@ -566,7 +793,8 @@ __global__ void matrix_subtract_kernel(unsigned char* A, unsigned char* B, unsig
     }
 }
 
-__global__ void gradient_map_kernel(unsigned char* dev_input, float* magnitudeMap, int* orientationMap, int height, int width) {
+__global__ void gradient_map_kernel(unsigned char* dev_input, float* magnitudeMap, int* orientationMap, int height, 
+    int width) {
     
     int col = blockDim.x * blockIdx.x + threadIdx.x;
     int row = blockDim.y * blockIdx.y + threadIdx.y;
@@ -580,6 +808,6 @@ __global__ void gradient_map_kernel(unsigned char* dev_input, float* magnitudeMa
         double temp1 = pixVal - belowPixVal;
         double temp2 = pixVal - rightPixVal;
         magnitudeMap[idx] = sqrt(temp1 * temp1 + temp2 * temp2);
-        orientationMap[idx] = floor(atan2(temp1, (double)(rightPixVal - pixVal)));
+        orientationMap[idx] = floor((atan2(temp1, (double)(rightPixVal - pixVal)) + PI) * 180 / PI);
     }
 }

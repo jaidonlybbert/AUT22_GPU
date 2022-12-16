@@ -2,3 +2,6 @@ x64/
 v17/
 .vs/
 *.png
+*.exe
+*.exp
+*.lib
