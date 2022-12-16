@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <cassert>
 #include <stdio.h>
+#include <cmath>
 
 void bilinear_interpolate(unsigned char* inputArray, unsigned char** inputArrayExpanded, int inputWidth, int inputHeight,
 	float spacing, int* resultWidth, int* resultHeight) {
@@ -17,7 +18,7 @@ void bilinear_interpolate(unsigned char* inputArray, unsigned char** inputArrayE
 	int expandedHeight = ceil(inputHeight * spacing);
 	int expandedWidth = ceil(inputWidth * spacing);
 	int expandedLength = expandedHeight * expandedWidth;
-	*inputArrayExpanded = (unsigned char*)malloc(expandedLength * sizeof(unsigned char));
+	*inputArrayExpanded = (unsigned char*)malloc(expandedLength * (int)sizeof(unsigned char));
 
 	// Report the new width and height back to the main loop, for future use
 	*resultWidth = expandedWidth;
@@ -28,10 +29,10 @@ void bilinear_interpolate(unsigned char* inputArray, unsigned char** inputArrayE
 	for (int i = 0; i < expandedHeight; i++) {
 		for (int j = 0; j < expandedWidth; j++) {
 			// Ignore edges
-			if (i == 0 || j == 0) {
-				(*inputArrayExpanded)[i * expandedWidth + j] = 0;
-				continue;
-			}
+			//if (i == 0 || j == 0) {
+			//	(*inputArrayExpanded)[i * expandedWidth + j] = 0;
+			//	continue;
+			//}
 			// Coordinates of output pixel relative to the original image grid
 			float x = j / spacing;
 			float y = i / spacing;
@@ -48,7 +49,7 @@ void bilinear_interpolate(unsigned char* inputArray, unsigned char** inputArrayE
 			// Row-wise interpolated values
 			float R1, R2;
 			// Skip row-wise interpolation if the coordinate lands on a column instead of between columns
-			if (x != x1) {
+			if (x != x1 && x1 != x2) {
 				R1 = Q11 * (x2 - x) / (x2 - x1) + Q21 * (x - x1) / (x2 - x1);
 				R2 = Q12 * (x2 - x) / (x2 - x1) + Q22 * (x - x1) / (x2 - x1);
 			}
@@ -59,7 +60,7 @@ void bilinear_interpolate(unsigned char* inputArray, unsigned char** inputArrayE
 
 			// Final interpolated value
 			// Skip column-wise interpolation if coordinate lands on a row instead of between rows
-			if (y != y1) {
+			if (y != y1 && y1 != y2) {
 				(*inputArrayExpanded)[i * expandedWidth + j] = R1 * (y2 - y) / (y2 - y1) + R2 * (y - y1) / (y2 - y1);
 			}
 			else {
@@ -84,22 +85,19 @@ void gaussian_blur(unsigned char* img, unsigned char* outputArray, int inputWidt
 	float* kernel = NULL;
 	get_gaussian_kernel(&kernel, sigma, kernelWidth);
 
-	// Compute kernel sum for normalization
-	float kernelCoefficientSum = 0;
-	for (int i = 0; i < kernelWidth * kernelWidth; i++) {
-		kernelCoefficientSum += kernel[i];
-	}
-
 	// Convolve image with 2D blur kernel
 	for (int i = 0; i < inputHeight; i++) {
 		for (int j = 0; j < inputWidth; j++) {
 			float pixelConvolutionSum = 0;
+			// Compute kernel sum for normalization
+			float kernelCoefficientSum = 0;
 			for (int k = 0; k < kernelWidth; k++) {
 				for (int z = 0; z < kernelWidth; z++) {
 					int vShift = k - kernelRadius;
 					int hShift = z - kernelRadius;
 					if ((i + vShift > 0) && (i + vShift < inputHeight) && (j + hShift > 0) && (j + hShift < inputWidth)) {
 						pixelConvolutionSum += img[(i + vShift) * inputWidth + (j + hShift)] * kernel[k * kernelWidth + z];
+						kernelCoefficientSum += kernel[k * kernelWidth + z];
 					}
 				}
 			}
@@ -263,8 +261,8 @@ void calculate_gradient(imagePyramidLayer pyramid[LAYERS]) {
 	unsigned char belowPixVal, rightPixVal;
 	for (int i = 0; i < LAYERS; i++) {
 		// Create image maps and reference them with pointers in the imagePyramidLayer structs
-		pyramid[i].gradientMagnitudeMap = (float*)malloc(pyramid[i].height * pyramid[i].width * sizeof(float));
-		pyramid[i].gradientOrientationMap = (int*)malloc(pyramid[i].height * pyramid[i].width * sizeof(int));
+		pyramid[i].gradientMagnitudeMap = (float*)malloc(pyramid[i].height * pyramid[i].width * (int)sizeof(float));
+		pyramid[i].gradientOrientationMap = (int*)malloc(pyramid[i].height * pyramid[i].width * (int)sizeof(int));
 		int width = pyramid[i].width;
 		int height = pyramid[i].height;
 
@@ -275,10 +273,11 @@ void calculate_gradient(imagePyramidLayer pyramid[LAYERS]) {
 				unsigned char pixVal = pyramid[i].imageA[j * width + k];
 				belowPixVal = pyramid[i].imageA[(j + 1) * width + k];
 				rightPixVal = pyramid[i].imageA[j * width + k + 1];
-				pyramid[i].gradientMagnitudeMap[j * width + k] = sqrt((pixVal - belowPixVal) * (pixVal - belowPixVal) +
-					(pixVal - rightPixVal) * (pixVal - rightPixVal));
-				pyramid[i].gradientOrientationMap[j * width + k] = floor(atan2((pixVal - belowPixVal),
-					(rightPixVal, pixVal)) * 360 / (2 * PI));
+				double temp1 = pixVal - belowPixVal;
+				double temp2 = pixVal - rightPixVal;
+				double angleRad = atan2(temp1, (double)(rightPixVal - pixVal));
+				pyramid[i].gradientMagnitudeMap[j * width + k] = sqrt(temp1 * temp1 + temp2 * temp2);
+				pyramid[i].gradientOrientationMap[j * width + k] = floor((angleRad + PI) * 180 / PI);
 			}
 		}
 
@@ -302,8 +301,7 @@ void characterize_keypoint(keypoint* keypoints, imagePyramidLayer pyramid[LAYERS
 	* The histogram has 36 bins covering the 360 degrees of possible rotation.
 	*/
 
-	// Histogram to collect local orientations per keypoint
-	float orientationHistogram[36] = { 0 };
+	
 
 	// Iterate over each keypoint in the linked list, and compute the gradient values
 	while (keypoints->next != NULL) {
@@ -313,6 +311,8 @@ void characterize_keypoint(keypoint* keypoints, imagePyramidLayer pyramid[LAYERS
 		int ycoord = keypoints->y * pow(BILINEAR_INTERPOLATION_SPACING, layer);
 		int width = pyramid[layer].width;
 		int height = pyramid[layer].height;
+		// Histogram to collect local orientations per keypoint
+		float orientationHistogram[36] = { 0 };
 
 		// A gaussian kernel is used for the weighted histogram
 		// The 'sigma' parameter is based on the layers level of blur
@@ -355,8 +355,6 @@ void characterize_keypoint(keypoint* keypoints, imagePyramidLayer pyramid[LAYERS
 
 		free(gaussian_kernel);
 	}
-
-
 }
 
 void draw_keypoints(keypoint* keypoints, unsigned char* inputImage, unsigned char* outputImage, int width, int height) {
@@ -366,7 +364,7 @@ void draw_keypoints(keypoint* keypoints, unsigned char* inputImage, unsigned cha
 
 	// Draw keypoint graphic template. This will be copied and rotated to match each keypoint orientation.
 	unsigned char keypointGraphicWidth = 17;
-	unsigned char* keypointGraphic = (unsigned char*)malloc(keypointGraphicWidth * keypointGraphicWidth * sizeof(unsigned char));
+	unsigned char* keypointGraphic = (unsigned char*)malloc(keypointGraphicWidth * keypointGraphicWidth * (int)sizeof(unsigned char));
 	for (int i = 0; i < keypointGraphicWidth; i++) {
 		// Top line
 		keypointGraphic[i] = 255;
@@ -399,7 +397,7 @@ void draw_keypoints(keypoint* keypoints, unsigned char* inputImage, unsigned cha
 	while (keypoints->next != NULL) {
 
 		// Create annotation map for keypoint
-		keypointGraphicTranslated = (unsigned char*)malloc(keypointGraphicTranlatedWidth * keypointGraphicTranlatedWidth * sizeof(unsigned char));
+		keypointGraphicTranslated = (unsigned char*)malloc(keypointGraphicTranlatedWidth * keypointGraphicTranlatedWidth * (int)sizeof(unsigned char));
 		// Store pointer to map in keypoint
 		keypoints->graphic = keypointGraphicTranslated;
 
@@ -416,8 +414,8 @@ void draw_keypoints(keypoint* keypoints, unsigned char* inputImage, unsigned cha
 		// Matrix math requires map to be in coordinate form for transformation
 		// Y coordinates are relected to match a right-hand coordinate system
 		int numCoordinates = keypointGraphicWidth * 2 + (keypointGraphicWidth - 2) * 2 + (int)floor(keypointGraphicWidth / 2) - 1;
-		float* keypointCoordinates = (float*)malloc(2 * numCoordinates * sizeof(float));
-		float* keypointCoordinatesTranslated = (float*)malloc(2 * numCoordinates * sizeof(float));
+		float* keypointCoordinates = (float*)malloc(2 * numCoordinates * (int)sizeof(float));
+		float* keypointCoordinatesTranslated = (float*)malloc(2 * numCoordinates * (int)sizeof(float));
 		int loadedCoordinates = 0;
 		for (int i = 0; i < keypointGraphicWidth; i++) {
 			for (int j = 0; j < keypointGraphicWidth; j++) {
@@ -517,13 +515,14 @@ void draw_keypoints(keypoint* keypoints, unsigned char* inputImage, unsigned cha
 		for (int i = 0; i < annotationWidth; i++) {
 			for (int j = 0; j < annotationWidth; j++) {
 				if (annotation[i * annotationWidth + j] == 255 && (y + i < height) && (y+i > 0) && (x + j < width) && (x+j > 0)) {
-					outputImage[(y + i) * width + (x + j)] = 128;
+					outputImage[(y + i) * width + (x + j)] = 255;
 				}
 			}
 		}
 		keypoints = keypoints->next;
 		keypointCount++;
 	}
+	printf("Keypoints count: %d\n", keypointCount);
 }
 
 void get_gaussian_kernel(float** kernel, float sigma, int kernelWidth) {
@@ -533,8 +532,8 @@ void get_gaussian_kernel(float** kernel, float sigma, int kernelWidth) {
 	assert(kernelWidth % 2 == 1);
 	assert(kernelWidth > 0);
 
-	float* blurKernel1D = (float*)malloc(kernelWidth * sizeof(float));
-	*kernel = (float*)malloc(kernelWidth * kernelWidth * sizeof(float));
+	float* blurKernel1D = (float*)malloc(kernelWidth * (int)sizeof(float));
+	*kernel = (float*)malloc(kernelWidth * kernelWidth * (int)sizeof(float));
 
 	// Build 1D blur kernel
 	int kernelRadius = floor(kernelWidth / 2);
