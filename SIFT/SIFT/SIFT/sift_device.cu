@@ -92,17 +92,19 @@ void dev_generate_key_masks(imagePyramidLayer pyramid[LAYERS],
         //printf("- Key mask generated.\n");
 
         //-----------DEBUG OUTPUT------------
-        unsigned char* h_keymask = (unsigned char*)malloc(pyramid[i].width * pyramid[i].height * sizeof(unsigned char));
-        checkCuda(cudaMemcpy(h_keymask, pyramid[i].keyMask, pyramid[i].height * pyramid[i].width * (int)sizeof(unsigned char), 
-                             cudaMemcpyDeviceToHost));
-        int keypointCount = 0;
-        for (int j = 0; j < pyramid[i].height * pyramid[i].width; j++) {
-            if (h_keymask[j] != 255) {
-                keypointCount++;
+        if (DEBUG) {
+            unsigned char* h_keymask = (unsigned char*)malloc(pyramid[i].width * pyramid[i].height * sizeof(unsigned char));
+            checkCuda(cudaMemcpy(h_keymask, pyramid[i].keyMask, pyramid[i].height * pyramid[i].width * (int)sizeof(unsigned char),
+                cudaMemcpyDeviceToHost));
+            int keypointCount = 0;
+            for (int j = 0; j < pyramid[i].height * pyramid[i].width; j++) {
+                if (h_keymask[j] != 255) {
+                    keypointCount++;
+                }
             }
+            free(h_keymask);
+            printf("- Layer %d keypoints: %d\n", i, keypointCount);
         }
-        free(h_keymask);
-        printf("- Layer %d keypoints: %d\n", i, keypointCount);
     }
 }
 
@@ -112,7 +114,7 @@ __global__ void generate_key_mask_kernel(imagePyramidLayer pyramid[LAYERS], floa
     unsigned char* dev_DoG = pyramid[layer].DoG;
     unsigned char* dev_DoG_below = pyramid[layer + 1].DoG;
     unsigned char* dev_DoG_above = pyramid[layer - 1].DoG;
-    int* dev_orientation_map = pyramid[layer].gradientOrientationMap;
+    unsigned char* dev_orientation_map = pyramid[layer].gradientOrientationMap;
     unsigned char* dev_keymask = pyramid[layer].keyMask;
     int width = pyramid[layer].width;
     int height = pyramid[layer].height;
@@ -227,10 +229,10 @@ __global__ void generate_key_mask_kernel(imagePyramidLayer pyramid[LAYERS], floa
                 width, height, col, row, idx);
             cudaDeviceSynchronize();
             dim3 BlockDimDraw(17, 17, 1);
-            if (layer == 1) {
-                draw_keypoint_kernel << <GridDim, BlockDimDraw >> > (dev_KeypointGraphic,
-                    dev_OutputImage, dev_keymask, idx, row, col, layer, outputWidth, outputHeight);
-            }
+
+            draw_keypoint_kernel << <GridDim, BlockDimDraw >> > (dev_KeypointGraphic,
+                dev_OutputImage, dev_keymask, idx, row, col, layer, outputWidth, outputHeight);
+
         }
         else {
             dev_keymask[idx] = 255; // 255 indicates no keypoint
@@ -254,8 +256,8 @@ __global__ void draw_keypoint_kernel(unsigned char* dev_keypoint_template, unsig
     unsigned char pixVal = dev_keypoint_template[threadIdx.y * 17 + threadIdx.x];
     
     // Coordinates of thread centered at zero for rotation
-    float x_in = threadIdx.x - blockDim.x / 2.0;
-    float y_in = threadIdx.y - blockDim.y / 2.0;
+    float x_in = threadIdx.x - floor(blockDim.x / 2.0);
+    float y_in = threadIdx.y - floor(blockDim.y / 2.0);
 
     // Transform matrix
     __shared__ double rotationMatrix[2][2];
@@ -286,8 +288,8 @@ __global__ void draw_keypoint_kernel(unsigned char* dev_keypoint_template, unsig
     float y_out = (rotationMatrix[1][0] * x_in + rotationMatrix[1][1] * y_in);
 
     // roatated coordinates of thread (pixel) relative to output image grid
-    int outputRow = (int)(row + y_out - (blockDim.y / 2.0));
-    int outputCol = (int)(col + x_out - (blockDim.x / 2.0));
+    int outputRow = (int)(row + y_out);
+    int outputCol = (int)(col + x_out);
 
     //-------DEBUG OUTPUT----------
     //if (threadIdx.x == 0 && threadIdx.y == 0) {
@@ -300,7 +302,7 @@ __global__ void draw_keypoint_kernel(unsigned char* dev_keypoint_template, unsig
     }
 }
 
-__global__ void orientation_histogram_kernel(unsigned char* keyMask, int* orientationMap, float* gaussianKernel, int width, 
+__global__ void orientation_histogram_kernel(unsigned char* keyMask, unsigned char* orientationMap, float* gaussianKernel, int width, 
     int height, int x, int y, int idx) {
     // For each keypoint, accumulate a histogram of local image gradient orientations using a Gaussian-weighted window
     //		with 'sigma' of 3 times that of the current smoothing scale
@@ -322,8 +324,11 @@ __global__ void orientation_histogram_kernel(unsigned char* keyMask, int* orient
 
     if (row < height && row > 0 && col > 0 && col < width) {
         float orientation = orientationMap[map_idx]; 
-        int bin = floor(orientation / 10);
-        atomicAdd((orientation_histogram+bin), weight);
+        int bin = orientation;
+        if (bin == 36) bin = 0;
+        if (bin >= 0 && bin < 36) {
+            atomicAdd((orientation_histogram + bin), weight);
+        }
     }
 
     __syncthreads();
@@ -345,8 +350,8 @@ __global__ void orientation_histogram_kernel(unsigned char* keyMask, int* orient
     }
 }
 
-void dev_calculate_gradient_maps(unsigned char* baseImage, float* gradientMagnitudeMap, int* gradientOrientationMap, 
-    int width, int height) {
+void dev_calculate_gradient_maps(unsigned char* baseImage, float* gradientMagnitudeMap, 
+    unsigned char* gradientOrientationMap, int width, int height) {
     /*
     * Calculates gradient magnitude and gradient orientation maps for each layer of the pyramid on device.
     *
@@ -553,7 +558,7 @@ __global__ void matrix_subtract_kernel(unsigned char* A, unsigned char* B, unsig
     }
 }
 
-__global__ void gradient_map_kernel(unsigned char* dev_input, float* magnitudeMap, int* orientationMap, int height, 
+__global__ void gradient_map_kernel(unsigned char* dev_input, float* magnitudeMap, unsigned char* orientationMap, int height, 
     int width) {
     
     int col = blockDim.x * blockIdx.x + threadIdx.x;
@@ -568,6 +573,15 @@ __global__ void gradient_map_kernel(unsigned char* dev_input, float* magnitudeMa
         double temp1 = pixVal - belowPixVal;
         double temp2 = pixVal - rightPixVal;
         magnitudeMap[idx] = sqrt(temp1 * temp1 + temp2 * temp2);
-        orientationMap[idx] = floor((atan2(temp1, (double)(rightPixVal - pixVal)) + PI) * 180 / PI);
+        orientationMap[idx] = (unsigned char)floor((atan2(temp1, (double)(rightPixVal - pixVal)) + PI) * 18 / PI); // (0-36 = degrees / 10)
+    }
+
+    __syncthreads();
+
+    if (row == height - 1 && col < width) {
+        orientationMap[idx] = orientationMap[idx - width];
+    }
+    else if ((row < height - 1) && (col == width - 1)) {
+        orientationMap[idx] = orientationMap[idx - 1];
     }
 }

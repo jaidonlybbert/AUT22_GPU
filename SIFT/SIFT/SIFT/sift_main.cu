@@ -21,6 +21,7 @@
 *		| stb_image.h
 *		| stb_image_write.h
 *		| test_image.png
+*       | cuda_helpers.h
 *	|- Layers
 *		\
 *		| empty
@@ -29,7 +30,8 @@
 *		| sift_host.cpp 
 *		| sift_host.h
 *		| sift_device.cu
-*       | host_main.cpp (this file)
+*       | sift_device.cuh
+*       | sift_main.cu (this file)
 */
 
 
@@ -50,13 +52,11 @@ __device__ __constant__ unsigned char dev_KeypointGraphic[289];
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "../util/stb_image_write.h"
 
-// Debug flag for additional output
-#define DEBUG false
-
 void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int imgSize, int imgWidth, int imgHeight,
     int* outputWidth, int* outputHeight);
 
 void compare_images(unsigned char* a, unsigned char* b, int width, int height);
+void compare_keypoint_masks(unsigned char* a, unsigned char* b, int width, int height);
 void validate_output();
 
 int main() {
@@ -118,9 +118,11 @@ int main() {
     free(h_outputImage);
     nvtxMark("Write complete.");
 
-    nvtxMark("Validating output.");
-    validate_output();
-    nvtxMark("Validation complete.");
+    if (DEBUG) {
+        nvtxMark("Validating output.");
+        validate_output();
+        nvtxMark("Validation complete.");
+    }
 
     return 0;
 }
@@ -144,7 +146,8 @@ void validate_output() {
     char directory[] = "../Layers/AX.png";
 
     for (int i = 0; i < LAYERS; i++) {
-        for (int j = 0; j < 3; j++) {
+        for (int j = 0; j < 4; j++) {
+            if ((i == 0 || i == 3) && (j == 3)) continue; // Skip orientation maps for layers 0 & 3
             printf("Comparing %c%d with %c%d...\n", ((char)'A' + j), i, ((char)'E' + j), i);
             directory[10] = (char)'A' + j;
             directory[11] = (char)('0' + (char)i);
@@ -155,6 +158,55 @@ void validate_output() {
 
         }
     }
+
+    printf("Comparing keypoint mask layer 1...\n");
+    const char h_keyMask1[] = "../Layers/hostKeyMask1.png";
+    const char h_keyMask2[] = "../Layers/hostKeyMask2.png";
+    const char dev_keyMask1[] = "../Layers/devKeyMask1.png";
+    const char dev_keyMask2[] = "../Layers/devKeyMask2.png";
+    h_img = stbi_load(h_keyMask1, &x_cols, &y_rows, &n_pixdepth, 1);
+    d_img = stbi_load(dev_keyMask1, &x_cols, &y_rows, &n_pixdepth, 1);
+    compare_keypoint_masks(h_img, d_img, x_cols, y_rows);
+
+    printf("Comparing keypoint mask layer 2...\n");
+    h_img = stbi_load(h_keyMask2, &x_cols, &y_rows, &n_pixdepth, 1);
+    d_img = stbi_load(dev_keyMask2, &x_cols, &y_rows, &n_pixdepth, 1);
+    compare_keypoint_masks(h_img, d_img, x_cols, y_rows);
+
+}
+
+void compare_keypoint_masks(unsigned char* a, unsigned char* b, int width, int height) {
+    int locationErrors = 0;
+    int orientErrors[3] = { 0 };
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            unsigned char tmp1 = a[i * width + j];
+            unsigned char tmp2 = b[i * width + j];
+
+            int tmp3 = abs(tmp1 - tmp2);
+            int tmp4 = (tmp1 < tmp2) ? (tmp1 + 36 - tmp2) : (tmp2 + 36 - tmp1);
+
+            int error = min(tmp3, tmp4);
+
+            if ((tmp1 == 255 && tmp2 != 255) || (tmp1 != 255 && tmp2 == 255)) {
+                locationErrors++;
+            }
+            else if (error == 1) {
+                //printf("- Mismatch: %d, Row: %d, Col: %d\n", (int)tmp1 - tmp2, i, j);
+                orientErrors[0]++;
+            }
+            else if (error == 2) {
+                orientErrors[1]++;
+            }
+            else if (error > 2) {
+                orientErrors[2]++;
+            }
+        }
+    }
+    printf("- Keypoint location errors: %d\n", locationErrors);
+    printf("- Keypoint orientations off by 10 deg: %d\n", orientErrors[0]);
+    printf("- Keypoint orientations off by 20 deg: %d\n", orientErrors[1]);
+    printf("- Keypoint orientations off >= 30 deg: %d\n", orientErrors[2]);
 }
 
 void compare_images(unsigned char* a, unsigned char* b, int width, int height) {
@@ -185,7 +237,7 @@ void compare_images(unsigned char* a, unsigned char* b, int width, int height) {
 void dev_sift(unsigned char* dev_rawImage, unsigned char** dev_outputImage, int imgSize, int imgWidth, int imgHeight,
     int* outputWidth, int* outputHeight)
 {
-    printf("\n=====DEVICE SIFT=====\n");
+    if (DEBUG) printf("\n=====DEVICE SIFT=====\n");
 
     unsigned char* dev_PyramidInput = 0;
     unsigned char* dev_LayerInput = 0;
@@ -227,14 +279,17 @@ void dev_sift(unsigned char* dev_rawImage, unsigned char** dev_outputImage, int 
     //int* h_debug_orientations = NULL;
 
     // DEBUG OUTPUT IMAGE
-    const char dev_interpimg[] = "../Layers/deviceInterp.png";
-    h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
-    checkCuda(cudaMemcpy(h_debug_img, dev_PyramidInput, resultWidth * resultHeight * (int)sizeof(unsigned char),
-        cudaMemcpyDeviceToHost));
-    stbi_write_png(dev_interpimg, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
-    free(h_debug_img);
+    if (DEBUG) {
+        const char dev_interpimg[] = "../Layers/deviceInterp.png";
+        h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
+        checkCuda(cudaMemcpy(h_debug_img, dev_PyramidInput, resultWidth * resultHeight * (int)sizeof(unsigned char),
+            cudaMemcpyDeviceToHost));
+        stbi_write_png(dev_interpimg, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
+        free(h_debug_img);
 
-    printf("- Building pyramid...\n");
+        printf("- Building pyramid...\n");
+    }
+
 
     // For each layer in pyramid, construct two images with increasing levels of blur, and compute the difference of 
     // gaussian (DoG)
@@ -272,60 +327,50 @@ void dev_sift(unsigned char* dev_rawImage, unsigned char** dev_outputImage, int 
         nvtxMark("Gaussian blur A");
         dev_gaussian_blur(dev_LayerInput, pyramid[i].imageA, resultWidth, resultHeight, sigma, kernelWidth);
         // DEBUG OUTPUT IMAGE
-        h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
-        checkCuda(cudaMemcpy(h_debug_img, pyramid[i].imageA, resultWidth * resultHeight * (int)sizeof(unsigned char), 
-                             cudaMemcpyDeviceToHost));
-        stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
-        free(h_debug_img);
+        if (DEBUG) {
+            h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
+            checkCuda(cudaMemcpy(h_debug_img, pyramid[i].imageA, resultWidth * resultHeight * (int)sizeof(unsigned char),
+                cudaMemcpyDeviceToHost));
+            stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
+            free(h_debug_img);
+        }
 
         // 3) Apply gaussian blur to the image A -> 'B'
         nvtxMark("Gaussian blur B");
         dev_gaussian_blur(pyramid[i].imageA, pyramid[i].imageB, resultWidth, resultHeight, sigma, kernelWidth);
         // DEBUG OUTPUT IMAGE
-        h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
-        pyramid[i].layerOutputDir[10] = (char)'F';
-        checkCuda(cudaMemcpy(h_debug_img, pyramid[i].imageB, resultWidth * resultHeight * (int)sizeof(unsigned char), 
-                             cudaMemcpyDeviceToHost));
-        stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
-        free(h_debug_img);
+        if (DEBUG) {
+            h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
+            pyramid[i].layerOutputDir[10] = (char)'F';
+            checkCuda(cudaMemcpy(h_debug_img, pyramid[i].imageB, resultWidth * resultHeight * (int)sizeof(unsigned char),
+                cudaMemcpyDeviceToHost));
+            stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
+            free(h_debug_img);
+        }
 
         // 4) Subtract 'A' - 'B' -> 'DoG'
         nvtxMark("Matrix subtract");
         dev_matrix_subtract(pyramid[i].imageA, pyramid[i].imageB, pyramid[i].DoG, resultWidth, resultHeight);
-        // DEBUG OUTPUT IMAGE
-        //h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
-        //pyramid[i].layerOutputDir[10] = (char)'C';
-        //checkCuda(cudaMemcpy(h_debug_img, pyramid[i].DoG, resultWidth * resultHeight * (int)sizeof(unsigned char), 
-        //                     cudaMemcpyDeviceToHost));
-        //stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
-        //free(h_debug_img);
 
         // 5) Compute gradient maps
         nvtxMark("Generate gradient maps");
         dev_calculate_gradient_maps(pyramid[i].imageA, pyramid[i].gradientMagnitudeMap,
             pyramid[i].gradientOrientationMap, resultWidth, resultHeight);
         // DEBUG OUTPUT IMAGE
-        h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
-        pyramid[i].layerOutputDir[10] = (char)'G';
-        checkCuda(cudaMemcpy(h_debug_img, pyramid[i].DoG, resultWidth * resultHeight * (int)sizeof(unsigned char), 
-                             cudaMemcpyDeviceToHost));
-        stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
-        free(h_debug_img);
-
-        //------DEBUG CHECK VALID ORIENTATIONS-----
-        //h_debug_orientations = (int*)malloc(resultWidth * resultHeight * (int)sizeof(int));
-        //checkCuda(cudaMemcpy(h_debug_orientations, pyramid[i].gradientOrientationMap, resultWidth * resultHeight * 
-        // (int)sizeof(int), cudaMemcpyDeviceToHost));
-        //int countInvalidOrientations = 0;
-        //for (int k = 0; k < resultHeight; k++) {
-        //    for (int r = 0; r < resultWidth; r++) {
-        //        int tmp = h_debug_orientations[k * resultWidth + r];
-        //        if (tmp < 0 || tmp > 360) {
-        //            printf("Orientation: %d Row: %d Col: %d\n", tmp, k, r);
-        //        }
-        //    }
-        //}
-        //free(h_debug_orientations);
+        if (DEBUG) {
+            h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
+            pyramid[i].layerOutputDir[10] = (char)'G';
+            checkCuda(cudaMemcpy(h_debug_img, pyramid[i].DoG, resultWidth * resultHeight * (int)sizeof(unsigned char),
+                cudaMemcpyDeviceToHost));
+            stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
+            free(h_debug_img);
+            h_debug_img = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
+            pyramid[i].layerOutputDir[10] = (char)'H';
+            checkCuda(cudaMemcpy(h_debug_img, pyramid[i].gradientOrientationMap, resultWidth * resultHeight * (int)sizeof(unsigned char),
+                cudaMemcpyDeviceToHost));
+            stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, h_debug_img, resultWidth * 1);
+            free(h_debug_img);
+        }
 
         // 6) Apply bilinear interpolation to 'B' -> Image input for next layer
         //    Skip for last iteration
@@ -361,31 +406,33 @@ void dev_sift(unsigned char* dev_rawImage, unsigned char** dev_outputImage, int 
 
     // 7) Collect local maxima and minima coordinates in scale space, and mark them in the 'keyMask' of each layer
     //    Use CUDA dynamic parallelism to draw keypoints on the output image
-    printf("- Generating key masks...\n");
+    if (DEBUG) printf("- Generating key masks...\n");
     nvtxMark("Find keypoints and draw them on output image.");
     dev_generate_key_masks(pyramid, dev_PyramidInput, pyramidInputWidth, pyramidInputHeight);
 
     // DEBUG write keymasks to disk
-    const char dev_keyMask1[] = "../Layers/devKeyMask1.png";
-    const char dev_keyMask2[] = "../Layers/devKeyMask2.png";
-    h_debug_img = (unsigned char*)malloc(pyramid[1].width * pyramid[1].height * (int)sizeof(unsigned char));
-    checkCuda(cudaMemcpy(h_debug_img, pyramid[1].keyMask, pyramid[1].width* pyramid[1].height* (int)sizeof(unsigned char),
-        cudaMemcpyDeviceToHost));
-    stbi_write_png(dev_keyMask1, pyramid[1].width, pyramid[1].height, 1, h_debug_img, pyramid[1].width * 1);
-    free(h_debug_img);
-    h_debug_img = (unsigned char*)malloc(pyramid[2].width * pyramid[2].height * (int)sizeof(unsigned char));
-    checkCuda(cudaMemcpy(h_debug_img, pyramid[2].keyMask, pyramid[2].width* pyramid[2].height* (int)sizeof(unsigned char),
-        cudaMemcpyDeviceToHost));
-    stbi_write_png(dev_keyMask2, pyramid[2].width, pyramid[2].height, 1, h_debug_img, pyramid[2].width * 1);
-    free(h_debug_img);
+    if (DEBUG) {
+        const char dev_keyMask1[] = "../Layers/devKeyMask1.png";
+        const char dev_keyMask2[] = "../Layers/devKeyMask2.png";
+        h_debug_img = (unsigned char*)malloc(pyramid[1].width * pyramid[1].height * (int)sizeof(unsigned char));
+        checkCuda(cudaMemcpy(h_debug_img, pyramid[1].keyMask, pyramid[1].width * pyramid[1].height * (int)sizeof(unsigned char),
+            cudaMemcpyDeviceToHost));
+        stbi_write_png(dev_keyMask1, pyramid[1].width, pyramid[1].height, 1, h_debug_img, pyramid[1].width * 1);
+        free(h_debug_img);
+        h_debug_img = (unsigned char*)malloc(pyramid[2].width * pyramid[2].height * (int)sizeof(unsigned char));
+        checkCuda(cudaMemcpy(h_debug_img, pyramid[2].keyMask, pyramid[2].width * pyramid[2].height * (int)sizeof(unsigned char),
+            cudaMemcpyDeviceToHost));
+        stbi_write_png(dev_keyMask2, pyramid[2].width, pyramid[2].height, 1, h_debug_img, pyramid[2].width * 1);
+        free(h_debug_img);
 
-    printf("- Done.\n");
+        printf("- Done.\n");
+    }
 }
 
 void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int imgSize, int imgWidth, int imgHeight, 
     int* outputWidth, int* outputHeight) {
 
-    printf("\n=====HOST SIFT=====\n");
+    if (DEBUG) printf("\n=====HOST SIFT=====\n");
 
 	// 1) Expand the input image via bilinear interpolation -> 'inputArrayExpanded'
 	//      This expanded image is the 'input' top layer of the image pyramid
@@ -394,9 +441,12 @@ void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int img
 	int resultWidth = 0;
 	int resultHeight = 0;
 
+    nvtxMark("Expanding input");
 	bilinear_interpolate(h_rawImage, &inputArrayExpanded, imgWidth, imgHeight, 2, &resultWidth, &resultHeight);
-    const char host_interp[] = "../Layers/hostinterp.png";
-    stbi_write_png(host_interp, resultWidth, resultHeight, 1, inputArrayExpanded, resultWidth * 1);
+    if (DEBUG) {
+        const char host_interp[] = "../Layers/hostinterp.png";
+        stbi_write_png(host_interp, resultWidth, resultHeight, 1, inputArrayExpanded, resultWidth * 1);
+    }
 
 	unsigned char* interpolatedInput = inputArrayExpanded;
 	int interpolatedWidth = resultWidth;
@@ -409,12 +459,13 @@ void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int img
 	// This template is used to iteratively export layers as images, by replacing the placeholder 'X' with the layer index
 	const char directoryTemplate[] = "../Layers/AX.png";
 
-    printf("- Building pyramid...\n");
+    if (DEBUG) printf("- Building pyramid...\n");
 
 	// For each layer in pyramid, construct two images with increasing levels of blur, and compute the difference of gaussian (DoG)
 	// Apply bilinear interpolation to the second of the two blurred images, and use that in the next iteration as the input image
 	// Keep these images in memory, and reference them via the pointers in the 'imagePyramidLayer' structs
 	for (int i = 0; i < LAYERS; i++) {
+        nvtxRangePush("Building Pyramid Layer");
 
 		// Copy directory name to layer
 		for (int j = 0; j < 17; j++) {
@@ -432,38 +483,48 @@ void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int img
         }
 
 		// 2) Apply gaussian blur to the input image -> 'A'
+        nvtxRangePush("Gaussian blur A");
 		pyramid[i].imageA = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
 		float sigma = sqrt(2);
 		int kernelWidth = 9;
 
 		gaussian_blur(inputArrayExpanded, pyramid[i].imageA, resultWidth, resultHeight, sigma, kernelWidth);
-
+        nvtxRangePop();
         //----DEBUG OUTPUT
-		stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, pyramid[i].imageA, resultWidth * 1);
+		if (DEBUG) stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, pyramid[i].imageA, resultWidth * 1);
 
 		// 3) Apply gaussian blur to the image A -> 'B'
+        nvtxRangePush("Gaussian blur B");
 		pyramid[i].imageB = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
 
 		gaussian_blur(pyramid[i].imageA, pyramid[i].imageB, resultWidth, resultHeight, sigma, kernelWidth);
-
+        nvtxRangePop();
         //----DEBUG OUTPUT
-		pyramid[i].layerOutputDir[10] = (char)'B';
-		stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, pyramid[i].imageB, resultWidth * 1);
+        if (DEBUG) {
+            pyramid[i].layerOutputDir[10] = (char)'B';
+            stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, pyramid[i].imageB, resultWidth * 1);
+        }
 
 		// 4) Subtract 'A' - 'B' -> 'C'
+        nvtxRangePush("Matrix subtract");
 		pyramid[i].DoG = (unsigned char*)malloc(resultWidth * resultHeight * (int)sizeof(unsigned char));
 
 		matrix_subtract(pyramid[i].imageA, pyramid[i].imageB, pyramid[i].DoG, resultWidth, resultHeight);
-
+        nvtxRangePop();
         //----DEBUG OUTPUT
-		pyramid[i].layerOutputDir[10] = (char)'C';
-		stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, pyramid[i].DoG, resultWidth * 1);
+        if (DEBUG) {
+            pyramid[i].layerOutputDir[10] = (char)'C';
+            stbi_write_png(pyramid[i].layerOutputDir, resultWidth, resultHeight, 1, pyramid[i].DoG, resultWidth * 1);
+        }
 
 		// 5) Apply bilinear interpolation to 'B' -> Image input for next layer
+        nvtxRangePush("Bilinear Interpolation");
 		inputArrayExpanded = 0;
 
 		bilinear_interpolate(pyramid[i].imageB, &inputArrayExpanded, resultWidth, resultHeight, 
 			BILINEAR_INTERPOLATION_SPACING, &resultWidth, &resultHeight);
+        nvtxRangePop();
+        nvtxRangePop();
 	}
 
 	// 6) Collect local maxima and minima coordinates in scale space (x, y, layer) -> 'keypoints'
@@ -471,41 +532,48 @@ void host_sift(unsigned char* h_rawImage, unsigned char** h_outputImage, int img
 	keypoint* keypoints = NULL;
 	// Populate the linked list with all coordinates of extrema in the pyramid
 	
-    printf("- Indexing extrema...\n");
+    nvtxMark("Finding keypoints");
+    if (DEBUG) printf("- Indexing extrema...\n");
 	find_extrema(pyramid, &keypoints);
 	 
 	// 7) Calculate image gradient magnitude 'M' and orientations 'R' at each pixel for each smoothed image 
 	//    'A' at each layer of the pyramid. The result are maps with the same dimensions as their corresponding layers,
 	//    referenced in the imagePyramidLayer structs, where each entry corresponds to a matching pixel.
-    printf("- Generating gradient maps...\n");
+    nvtxMark("Creating gradient maps");
+    if (DEBUG) printf("- Generating gradient maps...\n");
 	calculate_gradient(pyramid);
+    if (DEBUG) {
+        for (int i = 0; i < LAYERS; i++) {
+            pyramid[i].layerOutputDir[10] = (char)'D';
+            stbi_write_png(pyramid[i].layerOutputDir, pyramid[i].width, pyramid[i].height, 1, pyramid[i].gradientOrientationMap, pyramid[i].width);
+        }
+    }
 
 	// 8) For each keypoint, accumulate a histogram of local image gradient orientations using a Gaussian-weighted window 
 	//		with 'sigma' of 3 times that of the current smoothing scale
 	//		Each histogram consists of 36 bins covering the 360 degree range of rotations. The peak of the histogram
 	//      is stored for each keypoint as its canonical orientation.
-    printf("- Characterizing keypoints...\n");
+    nvtxMark("Characterizing keypoints.");
+    if (DEBUG) printf("- Characterizing keypoints...\n");
 	characterize_keypoint(keypoints, pyramid);
 
 	// 9) Draw keypoint annotations. Annotations are done by multiplying a rotation matrix with coordinates of a template annotation 
 	//      to orient the annotation in the direction of the keypoint orientation. The translated annotation is written over top of
 	//      the original input image
-    printf("- Drawing keypoints...\n");
+    nvtxMark("Drawing keypoints.");
+    if (DEBUG) printf("- Drawing keypoints...\n");
 	unsigned char* annotatedImage = (unsigned char*)malloc(interpolatedHeight * interpolatedWidth * (int)sizeof(unsigned char));
 	draw_keypoints(keypoints, interpolatedInput, annotatedImage, interpolatedWidth, interpolatedWidth);
 
     *h_outputImage = annotatedImage;
 
-    printf("- Done.\n");
+    if (DEBUG) printf("- Done.\n");
 
     // DEBUG write keymasks to disk
-    const char host_keyMask1[] = "../Layers/hostKeyMask1.png";
-    const char host_keyMask2[] = "../Layers/hostKeyMask2.png";
-    stbi_write_png(host_keyMask1, pyramid[1].width, pyramid[1].height, 1, pyramid[1].keyMask, pyramid[1].width * 1);
-    stbi_write_png(host_keyMask2, pyramid[2].width, pyramid[2].height, 1, pyramid[2].keyMask, pyramid[2].width * 1);
-
-	//while (keypoints->next != NULL) {
-	//	printf("Layer: %d, X: %d, Y: %d, Rotation: %d\n", keypoints->layer, keypoints->x, keypoints->y, keypoints->orientation);
-	//	keypoints = keypoints->next;
-	//}
+    if (DEBUG) {
+        const char host_keyMask1[] = "../Layers/hostKeyMask1.png";
+        const char host_keyMask2[] = "../Layers/hostKeyMask2.png";
+        stbi_write_png(host_keyMask1, pyramid[1].width, pyramid[1].height, 1, pyramid[1].keyMask, pyramid[1].width * 1);
+        stbi_write_png(host_keyMask2, pyramid[2].width, pyramid[2].height, 1, pyramid[2].keyMask, pyramid[2].width * 1);
+    }
 }

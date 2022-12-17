@@ -2,6 +2,9 @@
 #ifndef SIFT_HOST_H
 #define SIFT_HOST_H
 
+// Debug flag for additional output
+#define DEBUG false
+
 // Pi approximate for generating gaussian distribution, and image rotations
 #define PI 3.14159265
 // Layers of the image 'pyramid' used for approximating Laplacian of Gaussian for keypoint detection
@@ -19,7 +22,7 @@ struct imagePyramidLayer {
 	unsigned char* imageB;      // Blurred image for the layer
 	unsigned char* DoG;         // Difference of Gaussian (A-B)
 	float* gradientMagnitudeMap; // Map of same dimensions as layer
-	int* gradientOrientationMap; // Map of same dimension as layer
+	unsigned char* gradientOrientationMap; // Gradient orientation pixel by pixel, 0-36 to indicate (degrees / 10)
 	unsigned char* keyMask;     // Canonical rotations for keypoints, 0-36 to indicate (degrees / 10) or 255 for no key
 	int height;                 // Hieght of images in layer
 	int width;                  // Width of images in layer

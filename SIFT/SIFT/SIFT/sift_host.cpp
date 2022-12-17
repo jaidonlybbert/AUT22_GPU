@@ -262,7 +262,7 @@ void calculate_gradient(imagePyramidLayer pyramid[LAYERS]) {
 	for (int i = 0; i < LAYERS; i++) {
 		// Create image maps and reference them with pointers in the imagePyramidLayer structs
 		pyramid[i].gradientMagnitudeMap = (float*)malloc(pyramid[i].height * pyramid[i].width * (int)sizeof(float));
-		pyramid[i].gradientOrientationMap = (int*)malloc(pyramid[i].height * pyramid[i].width * (int)sizeof(int));
+		pyramid[i].gradientOrientationMap = (unsigned char*)malloc(pyramid[i].height * pyramid[i].width * (int)sizeof(unsigned char));
 		int width = pyramid[i].width;
 		int height = pyramid[i].height;
 
@@ -277,7 +277,7 @@ void calculate_gradient(imagePyramidLayer pyramid[LAYERS]) {
 				double temp2 = pixVal - rightPixVal;
 				double angleRad = atan2(temp1, (double)(rightPixVal - pixVal));
 				pyramid[i].gradientMagnitudeMap[j * width + k] = sqrt(temp1 * temp1 + temp2 * temp2);
-				pyramid[i].gradientOrientationMap[j * width + k] = floor((angleRad + PI) * 180 / PI);
+				pyramid[i].gradientOrientationMap[j * width + k] = floor((angleRad + PI) * 18.0 / PI); // (degrees/10 in range 0-36)
 			}
 		}
 
@@ -329,9 +329,10 @@ void characterize_keypoint(keypoint* keypoints, imagePyramidLayer pyramid[LAYERS
 				float weight = gaussian_kernel[(i + kernelRadius) * kernelWidth + (j + kernelRadius)];
 
 				if (ycoord + i < height && ycoord + i >= 0 && xcoord + j < width && xcoord + j >= 0) {
-					float orientation = pyramid[layer].gradientOrientationMap[(ycoord + i) * width + (xcoord + j)];
-					int bin = floor(orientation / 10);
-					if (bin < 36 && bin > 0) {
+					int orientation = pyramid[layer].gradientOrientationMap[(ycoord + i) * width + (xcoord + j)];
+					int bin = orientation;
+					if (bin == 36) bin = 0;
+					if (bin < 36 && bin >= 0) {
 						orientationHistogram[bin] += weight;
 					}
 				}
@@ -511,11 +512,6 @@ void draw_keypoints(keypoint* keypoints, unsigned char* inputImage, unsigned cha
 	// For each keypoint, draw the annotation map on top of the output image
 	int keypointCount = 0;
 	while (keypoints->next != NULL) {
-		// Don't draw keypoints that don't meet the gradient magnitude threshold
-		//if (keypoints->magnitude < GRADIENT_MAGNITUDE_THRESHOLD) {
-		//	keypoints = keypoints->next;
-		//	continue;
-		//}
 		int inputX = keypoints->x * pow(BILINEAR_INTERPOLATION_SPACING, -keypoints->layer);
 		int inputY = keypoints->y * pow(BILINEAR_INTERPOLATION_SPACING, -keypoints->layer);
 		int x = inputX - annotationRadius;
@@ -531,7 +527,7 @@ void draw_keypoints(keypoint* keypoints, unsigned char* inputImage, unsigned cha
 		keypoints = keypoints->next;
 		keypointCount++;
 	}
-	printf("- Keypoints count: %d\n", keypointCount);
+	if (DEBUG) printf("- Keypoints count: %d\n", keypointCount);
 }
 
 void get_gaussian_kernel(float** kernel, float sigma, int kernelWidth) {
